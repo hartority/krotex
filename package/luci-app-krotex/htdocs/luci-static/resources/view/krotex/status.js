@@ -201,6 +201,7 @@ return view.extend({
 			: running ? _('Running') : _('Stopped');
 		this.fields.status.style.color = !available ? '' : running ? '#22863a' : '#b42318';
 		this.fields.enabled.textContent = available ? (data.enabled ? _('Enabled') : _('Disabled')) : '—';
+		this.autostartButton.textContent = !available ? _('Autostart unavailable') : data.enabled ? _('Disable autostart') : _('Enable autostart');
 		this.fields.pid.textContent = running ? String(data.pid) : '—';
 		this.fields.krotex_version.textContent = available && data.krotex_version ? data.krotex_version : '\u2014';
 		this.fields.core_version.textContent = available && data.core_version ? data.core_version : '—';
@@ -296,8 +297,7 @@ return view.extend({
 			this.routingList
 		]);
 		var actions = [
-			[ 'start', _('Start') ], [ 'stop', _('Stop') ], [ 'restart', _('Restart') ],
-			[ 'enable', _('Enable autostart') ], [ 'disable', _('Disable autostart') ]
+			[ 'start', _('Start') ], [ 'stop', _('Stop') ], [ 'restart', _('Restart') ]
 		].map(L.bind(function(action) {
 			var button = E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'style': 'margin:0',
 				'click': ui.createHandlerFn(this, 'handleAction', action[0]) }, action[1]);
@@ -305,8 +305,15 @@ return view.extend({
 			return button;
 		}, this));
 		var actionStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;max-width:100%';
-		this.serviceActions = E('div', { 'aria-label': _('Service controls'), 'style': actionStyle }, actions.slice(0, 3));
-		this.autostartActions = E('div', { 'aria-label': _('Autostart controls'), 'style': actionStyle }, actions.slice(3));
+		this.serviceActions = E('div', { 'aria-label': _('Service controls'), 'style': actionStyle }, actions);
+		this.autostartButton = E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'style': 'margin:0',
+			'click': L.bind(function() {
+				if (!this.lastStatus.available || !L.hasViewPermission()) return Promise.resolve();
+				return this.handleAction(this.lastStatus.enabled ? 'disable' : 'enable');
+			}, this)
+		}, _('Enable autostart'));
+		this.buttons.push(this.autostartButton);
+		this.autostartActions = E('div', { 'aria-label': _('Autostart controls'), 'style': actionStyle }, [ this.autostartButton ]);
 		var rows = [
 			[ 'status', _('Status') ], [ 'enabled', _('Autostart') ],
 			[ 'krotex_version', _('Krotex version') ], [ 'core_version', _('Xray version') ],

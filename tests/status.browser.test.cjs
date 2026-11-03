@@ -42,10 +42,10 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
       let macs = [];
       let routingMode='selected';
-      let checkFailure = false,saveFailure=false,saveCalls=0;
+      let checkFailure = false,saveFailure=false,saveCalls=0,autostart=true;
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
-        if(spec.method==='status') return {available:true,installed:true,running:true,krotex_version:'0.8.1'};
+        if(spec.method==='status') return {available:true,installed:true,running:true,enabled:autostart,krotex_version:'0.8.1'};
         if(spec.method==='sections') return {sections:saved};
         if(spec.method==='save_settings') {
           saveCalls++;
@@ -53,6 +53,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           saved=JSON.parse(mac);const routing=JSON.parse(enabled);routingMode=routing.mode;macs=routing.macs;return {code:0};
         }
         if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10',latency_ms:124};
+        if(spec.method==='action') { if(mac==='enable')autostart=true; if(mac==='disable')autostart=false; return {code:0}; }
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
         if(spec.method==='routing') return {mode:routingMode,macs:macs.slice(),enabled:routingMode==='all'||!!macs.length,active:routingMode==='all'||!!macs.length};
         if(spec.method==='set_routing_mode') {routingMode=mac;return {code:0};}
@@ -186,9 +187,14 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
 
           const statusRow=page.fields.status.parentElement.parentElement;
           const autostartRow=page.fields.enabled.parentElement.parentElement;
+          check(page.autostartButton.textContent==='Disable autostart','enabled autostart has the wrong action');
+          page.autostartButton.click();await pause();
+          check(!autostart&&page.autostartButton.textContent==='Enable autostart','one button did not disable autostart');
+          page.autostartButton.click();await pause();
+          check(autostart&&page.autostartButton.textContent==='Disable autostart','one button did not enable autostart');
           check(page.serviceActions.parentElement===page.fields.status.parentElement,'service controls are not beside Status');
           check(page.autostartActions.parentElement===page.fields.enabled.parentElement,'autostart controls are not beside Autostart');
-          check(page.serviceActions.querySelectorAll('button').length===3&&page.autostartActions.querySelectorAll('button').length===2,'actions are grouped incorrectly');
+          check(page.serviceActions.querySelectorAll('button').length===3&&page.autostartActions.querySelectorAll('button').length===1,'actions are grouped incorrectly');
           check(Math.abs(page.serviceActions.getBoundingClientRect().top-page.fields.status.getBoundingClientRect().top)<15,'status controls are on a separate row');
           check(autostartRow.getBoundingClientRect().top>=statusRow.getBoundingClientRect().bottom,'Autostart does not follow Status');
           check(page.statsPanel.querySelectorAll('dt').length===8,'statistics lost a metric');

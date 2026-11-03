@@ -213,3 +213,18 @@ test('read-only callers cannot stage or save routing',async()=>{
   await view.handleRouting(true,'02:11:22:33:44:55');await view.handleSettingsSave();
   assert.equal(view.routingMacs.length,0);assert.equal(state.settingsCalls.length,0);
 });
+
+
+test('one autostart button acts on the latest confirmed state',async()=>{
+  const state=harness(),view=state.view;
+  assert.equal(view.autostartButton.textContent,'Disable autostart');
+  await view.autostartButton.attrs.click();
+  assert.deepEqual(state.actions,['disable']);
+  state.response.enabled=false;await view.refresh();
+  assert.equal(view.autostartButton.textContent,'Enable autostart');
+  state.code=1;await view.autostartButton.attrs.click();
+  assert.deepEqual(state.actions,['disable','enable']);
+  assert.equal(view.autostartButton.textContent,'Enable autostart');
+  assert.equal(view.fields.enabled.textContent,'Disabled');
+  assert.equal(view.autostartButton.disabled,false);
+});
