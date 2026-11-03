@@ -104,14 +104,17 @@ render() {
 	valid_mac "$1" || { error 'Invalid device MAC address.'; return 1; }
 	local mac="$1"
 	render_remove
+	# A negative Ethernet match does not match loopback packets at all. Enter
+	# device rules only on a positive MAC match, so router DNS cannot be captured.
 	cat <<EOF
 add table inet krotex
 add chain inet krotex prerouting { type filter hook prerouting priority -151; policy accept; }
-add rule inet krotex prerouting ether saddr != $mac return
-add rule inet krotex prerouting meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10810 accept
-add rule inet krotex prerouting fib daddr type { local, broadcast, multicast } return
-add rule inet krotex prerouting ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
-add rule inet krotex prerouting meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10809 accept
+add chain inet krotex device_prerouting
+add rule inet krotex prerouting ether saddr $mac jump device_prerouting
+add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10810 accept
+add rule inet krotex device_prerouting fib daddr type { local, broadcast, multicast } return
+add rule inet krotex device_prerouting ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
+add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10809 accept
 add chain inet krotex forward { type filter hook forward priority -5; policy accept; }
 add rule inet krotex forward ether saddr $mac ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
 add rule inet krotex forward ether saddr $mac meta nfproto ipv6 counter reject with icmpx type admin-prohibited

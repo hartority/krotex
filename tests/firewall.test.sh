@@ -1,5 +1,5 @@
 #!/bin/sh
-# Requires root, network namespaces and an OpenWrt x86_64 rootfs with ip-full.
+# Requires root, Python 3, network namespaces and an OpenWrt x86_64 rootfs with ip-full.
 set -eu
 : "${OPENWRT_TEST_ROOT:?Set OPENWRT_TEST_ROOT to an extracted OpenWrt x86_64 rootfs}"
 if [ "${KROTEX_TEST_NETNS:-0}" != 1 ]; then
@@ -187,7 +187,7 @@ cat > "$WORK/server.json" <<'EOF'
   "dns":{"hosts":{"device.krotex.test":"203.0.113.77"},"servers":["localhost"]},
   "inbounds":[{"listen":"127.0.0.1","port":1443,"protocol":"vless","settings":{"clients":[{"id":"11111111-2222-4333-8444-555555555555"}],"decryption":"none"}}],
   "outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"dns","protocol":"dns"}],
-  "routing":{"rules":[{"type":"field","port":"53,5353","outboundTag":"dns"}]}
+  "routing":{"rules":[{"type":"field","port":"5353","outboundTag":"dns"}]}
 }
 EOF
 cat > "$WORK/client.json" <<EOF
@@ -196,6 +196,12 @@ cat > "$WORK/client.json" <<EOF
   "outbounds":[{"tag":"proxy","protocol":"vless","settings":{"vnext":[{"address":"127.0.0.1","port":1443,"users":[{"id":"11111111-2222-4333-8444-555555555555","encryption":"none"}]}]}}]
 }
 EOF
+nsenter -t "$WAN" -n ip addr add 1.1.1.1/32 dev lo
+ip route add 1.1.1.1/32 via 192.0.2.2
+nsenter -t "$WAN" -n python3 tests/dns-traffic.py serve > "$WORK/dns-server.log" 2>&1 &
+PIDS="$PIDS $!"
+python3 tests/dns-traffic.py serve 127.0.0.1 > "$WORK/router-dns.log" 2>&1 &
+PIDS="$PIDS $!"
 nsenter -t "$WAN" -n "$XRAY_TEST_BINARY" run -config "$WORK/endpoint.json" > "$WORK/endpoint.log" 2>&1 &
 PIDS="$PIDS $!"
 "$XRAY_TEST_BINARY" run -config "$WORK/server.json" > "$WORK/server.log" 2>&1 &
@@ -242,6 +248,17 @@ cmp "$WORK/quic-config-before" "$WORK/routing.json"
 test ! -d "$WORK/lock/quic-test"
 echo 'PASS: temporary QUIC diagnostic rejects immediately and restores its rules on Enter'
 
+before="$(wc -l < "$WORK/access.log")"
+"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
+	"$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 127.0.0.1 > "$WORK/router-dns-result" 2>&1 || {
+	cat "$WORK/router-dns-result"
+	tail -n 20 "$WORK/client.log"
+	exit 1
+}
+grep -q '203.0.113.77' "$WORK/router-dns-result"
+test "$(wc -l < "$WORK/access.log")" = "$before"
+echo 'PASS: router loopback DNS stays outside device routing'
+
 nsenter -t "$LAN" -n "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
 	"$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 192.168.55.1 > "$WORK/dns-result" 2>&1 || {
 	cat "$WORK/dns-result" "$WORK/access.log"
@@ -252,6 +269,11 @@ nsenter -t "$LAN" -n "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME
 grep -q '203.0.113.77' "$WORK/dns-result"
 grep -Eq '\[device-dns (>>|->) device-dns-proxy\]' "$WORK/access.log"
 echo 'PASS: device DNS is carried over UDP through VLESS'
+
+nsenter -t "$LAN" -n python3 tests/dns-traffic.py probe || {
+	tail -n 35 "$WORK/client.log" "$WORK/server.log" "$WORK/dns-server.log"
+	exit 1
+}
 
 timeout 8 nsenter -t "$LAN" -n bash -c 'exec 3<>/dev/udp/93.184.216.34/5353; printf "\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x06device\x06krotex\x04test\x00\x00\x01\x00\x01" >&3; dd bs=512 count=1 <&3 2>/dev/null' > "$WORK/udp-result" || {
 	tail -n 20 "$WORK/client.log" "$WORK/server.log"
