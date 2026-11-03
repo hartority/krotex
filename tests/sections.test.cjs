@@ -20,7 +20,7 @@ function run(operation, sections, config={outbounds:[]}) {
     const result = spawnSync(join(runtime,'lib/ld-musl-x86_64.so.1'), ['--library-path',runtime+'/lib:'+runtime+'/usr/lib',
       runtime+'/usr/bin/ucode','-L',runtime+'/usr/lib/ucode',compiler,operation,join(work,'config.json'),join(work,'request.json')], {encoding:'utf8'});
     if (result.status !== 0) throw new Error(result.stderr);
-    return JSON.parse(result.stdout);
+    return operation==='firewall' ? result.stdout : JSON.parse(result.stdout);
   } finally { rmSync(work,{recursive:true,force:true}); }
 }
 
@@ -217,4 +217,21 @@ test('mixed domain, IPv4 and CIDR destinations are OR rules with section priorit
       execFileSync(process.env.XRAY_TEST_BINARY,['run','-test','-config',resolve(__dirname,'../package/krotex/files/transparent.json'),'-config',path],{stdio:'pipe'});
     } finally {rmSync(work,{recursive:true,force:true});}
   }
+});
+
+
+test('firewall policies enforce IP actions for every protocol and preserve earlier domain rules', {skip:!runtime}, () => {
+  const config=run('compile',[section('direct','direct',['8.8.8.8']),section('deny','block',['8.8.0.0/16']),section('vpn','proxy',['9.9.9.0/24'],true)]);
+  const policy=run('firewall',[],config);
+  assert.ok(policy.indexOf('ip daddr { 8.8.8.8 } counter accept')<policy.indexOf('ip daddr { 8.8.0.0/16 } counter drop'));
+  assert.match(policy,/ip daddr \{ 9\.9\.9\.0\/24 \} meta l4proto != \{ tcp, udp \} counter drop/);
+  assert.match(policy,/meta l4proto != \{ tcp, udp \} counter drop\n$/);
+  assert.match(policy,/udp dport 443 return/,'public QUIC remains subject to the capture chain block');
+  const domainFirst=run('firewall',[],run('compile',[section('exception','direct',['allowed.example']),section('deny','block',['8.8.0.0/16'])]));
+  assert.ok(domainFirst.indexOf('ip daddr { 8.8.0.0/16 } meta l4proto { tcp, udp } th dport != 53 return')<domainFirst.indexOf('ip daddr { 8.8.0.0/16 } counter drop'));
+  assert.match(domainFirst,/counter accept\n$/,'unmatched non-TCP/UDP follows Direct');
+  const disabled=run('firewall',[],run('compile',[{...section('deny','block',['8.8.0.0/16']),enabled:false}]));
+  assert.equal(disabled.includes('ip daddr { 8.8.0.0/16 }'),false);
+  const blockedDefault=run('firewall',[],run('compile',[section('deny','block',[],true)]));
+  assert.match(blockedDefault,/counter drop\n$/);
 });

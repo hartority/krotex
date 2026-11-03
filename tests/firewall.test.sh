@@ -398,6 +398,31 @@ echo 'PASS: explicit service stop removes interception and restores direct acces
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=vpn.krotex.test' \
 	-addext 'subjectAltName=DNS:vpn.krotex.test,DNS:*.krotex.test' \
 	-keyout "$WORK/server.key" -out "$WORK/server.crt" > "$WORK/cert.log" 2>&1
+nsenter -t "$WAN" -n python3 tests/ip-protocol-traffic.py serve "$WORK/raw-protocol.log" &
+PIDS="$PIDS $!"
+for attempt in 1 2 3 4 5; do [ -f "$WORK/raw-protocol.log.ready" ] && break; sleep .2; done
+test -f "$WORK/raw-protocol.log.ready"
+probe_ping() {
+	local client="$1" address="$2" expected="$3"
+	if nsenter -t "$client" -n ping -c 1 -W 1 "$address" > "$WORK/ping-result" 2>&1; then
+		test "$expected" = allowed || { echo "FAIL: ping unexpectedly allowed: $address"; return 1; }
+	else
+		test "$expected" = blocked || { echo "FAIL: ping unexpectedly blocked: $address"; cat "$WORK/ping-result"; return 1; }
+	fi
+}
+probe_raw() {
+	local client="$1" address="$2" token="$3" expected="$4" attempt
+	nsenter -t "$client" -n python3 tests/ip-protocol-traffic.py send "$address" "$token"
+	if [ "$expected" = allowed ]; then
+		for attempt in 1 2 3 4 5 6 7 8 9 10; do
+			grep -qx "krotex-test:$token" "$WORK/raw-protocol.log" && return 0
+			sleep .1
+		done
+		echo "FAIL: raw GRE did not arrive: $token"; cat "$WORK/raw-protocol.log"; return 1
+	fi
+	sleep .2
+	! grep -qx "krotex-test:$token" "$WORK/raw-protocol.log"
+}
 python3 tests/sections-traffic.py "$WORK"
 for index in 1 2; do
 	"$XRAY_TEST_BINARY" run -config "$WORK/vpn$index.json" > "$WORK/vpn$index.log" 2>&1 &
@@ -433,6 +458,13 @@ probe_section sub.one.krotex.test section-vpn1
 probe_section two.krotex.test section-vpn2
 probe_section unmatched.krotex.test section-vpn2
 echo 'PASS: HTTP domain rules choose direct, VPN 1 or VPN 2; subdomains and first-match exclusions work'
+probe_ping "$LAN" 93.184.216.34 blocked
+probe_ping "$OTHER" 93.184.216.34 blocked
+probe_ping "$OTHER" 192.168.56.1 allowed
+probe_raw "$LAN" 93.184.216.34 fallback-vpn blocked
+probe_raw "$OTHER" 93.184.216.34 device-vpn blocked
+echo 'PASS: general Xray default and dedicated device VPNs block ICMP and raw GRE while router access remains available'
+
 probe_section allowed.blocked.krotex.test direct
 probe_blocked() {
 	local host="$1" scheme="$2" port="$3" before
@@ -513,9 +545,15 @@ cp "$WORK/sections-client.json" "$WORK/core-config.json"
 SECTIONS_PID=$!
 PIDS="$PIDS $SECTIONS_PID"
 sleep 1
+fw apply
 probe_section unmatched.krotex.test direct
 probe_section one.krotex.test section-vpn1
 echo 'PASS: without a default VPN, unmatched traffic is direct while listed sites still use VPN 1'
+probe_ping "$LAN" 93.184.216.34 allowed
+probe_raw "$LAN" 93.184.216.34 fallback-direct allowed
+probe_ping "$OTHER" 93.184.216.34 blocked
+echo 'PASS: Direct default permits ICMP and raw GRE without changing the dedicated VPN policy'
+
 
 
 probe_device_vpn() {
@@ -571,7 +609,8 @@ ucode package/krotex/files/sections.uc compile "$WORK/core-config.json" "$WORK/s
 python3 tests/sections-traffic.py "$WORK" trust
 cp "$WORK/sections-client.json" "$WORK/core-config.json"
 "$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
-PIDS="$PIDS $!"
+SECTIONS_PID=$!
+PIDS="$PIDS $SECTIONS_PID"
 nsenter -t "$WAN" -n ip addr add 93.184.216.35/32 dev lo
 nsenter -t "$WAN" -n ip addr add 93.184.217.34/32 dev lo
 ip route add 93.184.216.35/32 via 192.0.2.2
@@ -587,11 +626,50 @@ probe_destination() {
 	else
 		test "$tag" = block
 	fi
-	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq "device-tproxy (>>|->) $tag]"
+	if [ "$tag" = direct-fw ]; then
+		! tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->)'
+	else
+		tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq "device-tproxy (>>|->) $tag]"
+	fi
 }
-probe_destination 93.184.216.34 93.184.216.34 direct
+probe_destination 93.184.216.34 93.184.216.34 direct-fw
 probe_destination 93.184.216.35 93.184.216.35 block
 probe_destination unknown.krotex.test 93.184.216.35 block
 probe_destination allowed-ip.krotex.test 93.184.216.35 direct
 probe_destination 93.184.217.34 93.184.217.34 section-ip-vpn
 echo 'PASS: exact IP exceptions, subnet blocking, domain exceptions and subnet VPN routes work through real TPROXY'
+
+probe_ping "$LAN" 93.184.216.34 allowed
+probe_ping "$LAN" 93.184.216.35 blocked
+probe_ping "$LAN" 93.184.217.34 blocked
+probe_raw "$LAN" 93.184.216.34 ip-direct allowed
+probe_raw "$LAN" 93.184.216.35 ip-block blocked
+probe_raw "$LAN" 93.184.217.34 ip-vpn blocked
+probe_ping "$OTHER" 93.184.216.35 allowed
+probe_raw "$OTHER" 93.184.216.35 unselected allowed
+echo 'PASS: ordered Direct IP exceptions permit ICMP/GRE, Block subnets deny them, and Xray subnets prevent unsupported-protocol bypass'
+if nsenter -t "$LAN" -n python3 tests/ip-protocol-traffic.py dns 93.184.216.35; then
+	echo 'FAIL: DNS bypassed the Block IP rule through the shared DNS redirect' >&2; exit 1
+fi
+echo 'PASS: DNS interception cannot bypass an explicit IP Block even with earlier domain exceptions'
+
+
+kill "$SECTIONS_PID"
+wait "$SECTIONS_PID" 2>/dev/null || :
+python3 tests/sections-traffic.py "$WORK" ip-rules-hard
+ucode package/krotex/files/sections.uc compile "$WORK/core-config.json" "$WORK/sections-ip-request.json" > "$WORK/sections-client.json"
+python3 tests/sections-traffic.py "$WORK" trust
+cp "$WORK/sections-client.json" "$WORK/core-config.json"
+"$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
+PIDS="$PIDS $!"
+sleep 1
+fw apply
+before="$(wc -l < "$WORK/sections-client.log")"
+if nsenter -t "$LAN" -n curl --silent --noproxy '*' --connect-timeout 1 --max-time 2 -o /dev/null http://93.184.216.35:8080/; then
+	echo 'FAIL: TCP bypassed a firewall Block subnet' >&2; exit 1
+fi
+! tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->)'
+probe_ping "$LAN" 93.184.216.35 blocked
+probe_raw "$LAN" 93.184.216.35 hard-block blocked
+probe_destination 93.184.216.34 93.184.216.34 direct-fw
+echo 'PASS: an IP Block without earlier domain exceptions rejects TCP, ICMP and GRE in the firewall before Xray'

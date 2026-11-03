@@ -134,7 +134,7 @@ return baseclass.extend({
 			return card.element;
 		}, this));
 		return E('div', {}, [
-			E('p', { 'class': 'cbi-value-description' }, _('All external traffic and DNS from these devices use this VPN, independently of Smart routing. Local networks remain direct.')),
+			E('p', { 'class': 'cbi-value-description' }, _('External TCP/UDP traffic and DNS from these devices use this VPN, independently of Smart routing. Other external protocols are blocked to prevent bypass. Local networks remain direct.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin:.75em 0' }, [ select, manual, add ]),
 			E('ul', { 'style': 'list-style:none;padding:0;margin:.5em 0' }, rows.length ? rows : [ E('li', {}, _('No devices selected.')) ]) ]);
 	},
@@ -437,7 +437,7 @@ return baseclass.extend({
 		this.generalPanel = E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Smart routing')),
 			E('p', {}, _('Choose which websites, IPv4 addresses and subnets use VPN, connect directly, or are blocked. Sections are checked from top to bottom; the first match wins.')),
-			E('p', {}, _('Domains include subdomains. IP rules match destination addresses. Choose below which devices use these rules.')),
+			E('p', {}, _('Domains include subdomains. IP rules match destination addresses and also control other protocols. Xray routes block unsupported protocols. Choose below which devices use these rules.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
 			]), this.cards

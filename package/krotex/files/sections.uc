@@ -171,6 +171,37 @@ function normalize(input) {
 	return sections;
 }
 
+
+// IP-only protocols cannot carry domain names. TCP/UDP are deferred to Xray
+// when an earlier domain rule might change the section which wins.
+function firewall_policy(sections) {
+	let lines = [
+		'add chain inet krotex smart_policy',
+		'add rule inet krotex smart_policy fib daddr type { local, broadcast, multicast } return',
+		'add rule inet krotex smart_policy ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return',
+		// Keep the existing public QUIC block in the capture chain authoritative.
+		'add rule inet krotex smart_policy udp dport 443 return'
+	];
+	let domains_before = false, fallback = 'direct';
+	for (let section in sections) {
+		if (!section.enabled || section.mode == 'proxy_devices') continue;
+		if (section.fallback) fallback = section.mode;
+		if (length(section.ips || [])) {
+			let rule = 'add rule inet krotex smart_policy ip daddr { ' + join(', ', section.ips) + ' }';
+			if (domains_before) push(lines, rule + ' meta l4proto { tcp, udp } th dport != 53 return');
+			if (section.mode == 'direct') push(lines, rule + ' counter accept');
+			else if (section.mode == 'block') push(lines, rule + ' counter drop');
+			else {
+				push(lines, rule + ' meta l4proto != { tcp, udp } counter drop');
+				push(lines, rule + ' return');
+			}
+		}
+		if (length(section.domains)) domains_before = true;
+	}
+	push(lines, 'add rule inet krotex smart_policy meta l4proto != { tcp, udp } counter ' + (fallback == 'direct' ? 'accept' : 'drop'));
+	return join('\n', lines) + '\n';
+}
+
 function compile(sections) {
 	let rules = [{ type: 'field', inboundTag: ['device-dns'], outboundTag: 'device-dns-proxy' }];
 	let outbounds = [], dns_profile = null, fallback = 'direct';
@@ -227,6 +258,8 @@ try {
 	check(type(config) == 'object', 'Unable to read the Xray configuration.');
 	if (ARGV[0] == 'read')
 		printf('%J\n', { sections: current_sections(config), legacy: config.krotex_sections == null });
+	else if (ARGV[0] == 'firewall')
+		print(firewall_policy(normalize(current_sections(config))));
 	else if (ARGV[0] == 'connections') {
 		let entries = [], groups = {};
 		for (let section in current_sections(config)) {

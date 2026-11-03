@@ -155,6 +155,9 @@ add chain inet krotex prerouting { type filter hook prerouting priority -151; po
 add chain inet krotex forward { type filter hook forward priority -5; policy accept; }
 add chain inet krotex input { type filter hook input priority -5; policy accept; }
 EOF
+	if [ -n "${SMART_POLICY:-}" ] && [ -s "$SMART_POLICY" ]; then cat "$SMART_POLICY"
+	else printf 'add chain inet krotex smart_policy\n'
+	fi
 	# Specific device captures precede the common device routing rules.
 	if [ -n "${DEVICE_ROUTES:-}" ] && [ -s "$DEVICE_ROUTES" ]; then
 		while IFS='|' read -r assigned port dns; do
@@ -176,10 +179,20 @@ render_capture() {
 	cat <<EOF
 add chain inet krotex $chain
 add rule inet krotex prerouting $selector jump $chain
+EOF
+	if [ "$chain" = device_prerouting ]; then
+		printf 'add rule inet krotex %s meta nfproto ipv4 jump smart_policy\n' "$chain"
+	fi
+	cat <<EOF
 add rule inet krotex $chain meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:$dns accept
 add rule inet krotex $chain fib daddr type { local, broadcast, multicast } return
 add rule inet krotex $chain ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
 add rule inet krotex $chain meta nfproto ipv4 udp dport 443 counter drop
+EOF
+	if [ "$chain" != device_prerouting ]; then
+		printf 'add rule inet krotex %s meta nfproto ipv4 meta l4proto != { tcp, udp } counter drop\n' "$chain"
+	fi
+	cat <<EOF
 add rule inet krotex $chain meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:$port accept
 add rule inet krotex forward $selector ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
 add rule inet krotex forward $selector meta nfproto ipv6 counter reject with icmpx type admin-prohibited
@@ -192,8 +205,12 @@ read_device_routes() {
 	local routes route keys members key mac assigned port dns
 	DEVICE_ROUTES="$WORK/device-routes"
 	: > "$DEVICE_ROUTES"
+	SMART_POLICY="$WORK/smart-policy.nft"
+	: > "$SMART_POLICY"
 	[ -f "$CORE_CONFIG" ] || return 0
-	routes="$(ucode "$COMPILER" devices "$CORE_CONFIG")" || return 1
+	cp "$CORE_CONFIG" "$WORK/core.json" || return 1
+	ucode "$COMPILER" firewall "$WORK/core.json" > "$SMART_POLICY" || return 1
+	routes="$(ucode "$COMPILER" devices "$WORK/core.json")" || return 1
 	json_load "$routes" && json_select routes || return 1
 	json_get_keys routes
 	for route in $routes; do
