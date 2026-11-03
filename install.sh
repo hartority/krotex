@@ -109,8 +109,12 @@ if [ "$REMOTE" -eq 1 ] || [ ! -f "$SOURCE/package/krotex/files/krotex.init" ]; t
 	log "Downloading $REPOSITORY ($REF)..."
 	download "https://codeload.github.com/$REPOSITORY/tar.gz/$REF" "$WORK/source.tar.gz"
 	mkdir "$WORK/source"
-	tar -xzf "$WORK/source.tar.gz" -C "$WORK/source" --strip-components=1
-	SOURCE="$WORK/source"
+	# Minimal BusyBox tar has no --strip-components option. GitHub archives
+	# contain one top-level directory; select it after ordinary extraction.
+	tar -xzf "$WORK/source.tar.gz" -C "$WORK/source"
+	set -- "$WORK/source/"*
+	[ "$#" -eq 1 ] && [ -d "$1" ] || die 'Unexpected source archive structure.'
+	SOURCE=$1
 	SOURCE_REF=$REF
 fi
 

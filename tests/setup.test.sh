@@ -8,6 +8,8 @@ trap 'rm -rf "$WORK"' EXIT
 trap 'exit 1' HUP INT TERM
 TEST_ROOT="$WORK/router"
 export TEST_ROOT
+TEST_TAR="$(command -v tar)"
+export TEST_TAR
 mkdir -p "$WORK/source" "$WORK/bin" "$TEST_ROOT/etc/init.d" \
 	"$TEST_ROOT/usr/bin" "$TEST_ROOT/usr/share/libubox"
 cp -R package "$WORK/source/"
@@ -30,6 +32,16 @@ EOF
 cat > "$WORK/bin/sleep" <<'EOF'
 #!/bin/sh
 exit 0
+EOF
+cat > "$WORK/bin/tar" <<'EOF'
+#!/bin/sh
+# Model OpenWrt's minimal BusyBox tar, which has no GNU long options.
+for arg in "$@"; do
+  case "$arg" in
+    --*) printf 'tar: unrecognized option: %s\n' "${arg#--}" >&2; exit 1 ;;
+  esac
+done
+exec "$TEST_TAR" "$@"
 EOF
 cat > "$TEST_ROOT/usr/share/libubox/jshn.sh" <<'EOF'
 json_load() { return 0; }
