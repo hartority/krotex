@@ -158,8 +158,8 @@ return baseclass.extend({
 			mode.value = section.mode;
 			// Keep the native checkbox accessible, but hide theme-drawn pseudo-elements too.
 			var track = E('span', { 'aria-hidden': 'true',
-				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:1em;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
-			}, E('span', { 'style': 'position:absolute;top:50%;transform:translateY(-50%);left:' + (section.enabled ? 'calc(100% - .9em)' : '.15em') + ';width:.75em;height:.75em;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004' }));
+				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:999px;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
+			}, E('span', { 'style': 'position:absolute;top:.2em;bottom:.2em;' + (section.enabled ? 'right:.2em' : 'left:.2em') + ';aspect-ratio:1;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004' }));
 			var enabled = E('input', { 'type': 'checkbox', 'role': 'switch', 'aria-label': _('Enable section'),
 				'style': 'position:absolute;inset:0;display:block;box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;opacity:0;z-index:1;cursor:pointer',
 				'focus': function() { track.style.outline = '2px solid #52a8ec'; track.style.outlineOffset = '2px'; },
@@ -168,7 +168,7 @@ return baseclass.extend({
 			enabled.checked = !!section.enabled;
 			enabled.krotexBoundary = section.mode === 'unconfigured';
 			var enabledSwitch = E('label', { 'title': section.enabled ? _('Enabled') : _('Disabled'),
-				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;width:2em;height:1.15em;margin:0'
+				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;align-self:stretch;width:3.4em;margin:0'
 			}, [ enabled, track ]);
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
@@ -202,18 +202,21 @@ return baseclass.extend({
 						'input': L.bind(function(event) { section.url = event.target.value; this.changed(); this.linkWarning(link, warning); }, this) });
 					link.value = section.url;
 					this.controls.push(link);
-					fields.push(link, warning);
+					var linkBox = E('div', { 'style': 'position:relative' }, [ link ]);
+					fields.push(linkBox, warning);
 					if (section.connectionBeforeEdit != null) {
-						var cancel = E('button', { 'type': 'button', 'class': 'btn', 'aria-label': _('Cancel VLESS editing'),
+						var cancel = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'aria-label': _('Cancel VLESS editing'),
+							'title': _('Cancel'), 'style': 'position:absolute;top:.35em;right:.35em;display:flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;min-height:0;padding:0;line-height:1;color:#d93025;background:transparent;border:0;box-shadow:none;font-size:1.2em',
 							'click': L.bind(function() {
 								section.url = section.connectionBeforeEdit;
 								delete section.connectionBeforeEdit;
 								section.editingConnection = false;
 								this.dirty = this.legacyDirty || this.draftState() !== this.savedState;
 								this.renderCards();
-							}, this) }, _('Cancel'));
+							}, this) }, '×');
 						this.controls.push(cancel);
-						fields.push(cancel);
+						link.style.paddingRight = '2.6em';
+						linkBox.replaceChildren(link, cancel);
 					}
 					this.linkWarning(link, warning);
 				}

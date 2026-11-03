@@ -76,6 +76,10 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(input.clientHeight>500,'long link was not expanded');
           const cancel=document.querySelector('[aria-label="Cancel VLESS editing"]');
           check(cancel,'VLESS editing has no Cancel button');
+          check(cancel.textContent==='×','Cancel is not a compact cross');
+          const textboxBounds=input.getBoundingClientRect(),cancelBounds=cancel.getBoundingClientRect();
+          check(cancelBounds.top>=textboxBounds.top&&cancelBounds.top<textboxBounds.top+12&&cancelBounds.right<=textboxBounds.right&&cancelBounds.right>textboxBounds.right-12,'Cancel is not inside the top-right of the textbox');
+          check(getComputedStyle(cancel).color==='rgb(217, 48, 37)','Cancel cross is not red');
           input.value='invalid';input.dispatchEvent(new Event('input'));
           cancel.click();
           const editor=page.sectionsEditor;
@@ -113,6 +117,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(getComputedStyle(enabled.nextElementSibling).outlineStyle==='solid','switch lacks a visible keyboard focus indicator');
           enabled.blur();
           const up=card(2).querySelector('button[aria-label="Move section up"]');
+          check(Math.abs(enabled.parentElement.getBoundingClientRect().height-up.getBoundingClientRect().height)<=2,'switch height does not match the buttons');
           check(nameInput.getBoundingClientRect().right<=enabled.getBoundingClientRect().left&&enabled.getBoundingClientRect().right<=up.getBoundingClientRect().left,'Enabled is not between the name and arrows');
           check(Math.abs(nameInput.getBoundingClientRect().y-remove.getBoundingClientRect().y)<12,'name and buttons do not line up');
           enabled.click();
