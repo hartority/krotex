@@ -7,8 +7,13 @@
 Выполните по SSH на роутере от `root`:
 
 ```sh
-wget -O /tmp/krotex-install.sh https://raw.githubusercontent.com/hartority/krotex/main/install.sh
-sh /tmp/krotex-install.sh
+wget -O /tmp/krotex-install.sh https://raw.githubusercontent.com/hartority/krotex/main/install.sh && sh /tmp/krotex-install.sh
 ```
 
 После установки откройте **Сервисы → Krotex** в LuCI.
+
+## Обновление
+
+```sh
+wget -O /tmp/krotex-update.sh https://raw.githubusercontent.com/hartority/krotex/main/update.sh && sh /tmp/krotex-update.sh
+```
