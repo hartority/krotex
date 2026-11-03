@@ -36,7 +36,10 @@ EOF
 cat > "$WORK/bin/curl" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" > "$TEST_ROOT/curl-args"
-test ! -f "$TEST_ROOT/fail-request" || exit 7
+if [ -f "$TEST_ROOT/fail-request" ]; then
+  echo 'curl: (7) Failed to connect to 127.0.0.1 port 10808: Connection refused' >&2
+  exit 7
+fi
 echo '203.0.113.25'
 EOF
 cat > "$TEST_ROOT/xray" <<'EOF'
@@ -163,6 +166,10 @@ grep -q -- '--noproxy' "$TEST_ROOT/curl-args"
 touch "$TEST_ROOT/fail-request"
 call test_connection
 expect_code 1
+json_get_var curl_code curl_code
+test "$curl_code" = 7
+json_get_var error_message message
+case "$error_message" in *'Connection refused'*) ;; *) echo 'FAIL: curl error details were lost'; exit 1 ;; esac
 echo 'PASS: network check uses SOCKS with remote DNS and reports request failures'
 
 profile="$(printf '%s' "$profile" | sed 's/"port":443/"port":"443"/')"

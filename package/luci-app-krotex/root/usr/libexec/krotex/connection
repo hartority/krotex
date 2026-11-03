@@ -205,14 +205,27 @@ save() {
 test_connection() {
 	acquire_lock
 	# Refuse to label the initial direct-only SOCKS listener as a working proxy.
-	local protocol tag result
+	local protocol tag result curl_code detail
 	json_load "$(cat "$CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
 	json_get_var protocol protocol
 	json_get_var tag tag
 	[ "$protocol" = vless ] && [ "$tag" = proxy ] || fail 'Configure a VLESS connection first.'
 	running || fail 'Start Krotex before checking the connection.'
-	result="$(curl --silent --fail --noproxy '' --proxy socks5h://127.0.0.1:10808 \
-		--connect-timeout 5 --max-time 12 --proto '=https' https://api.ipify.org 2>/dev/null)" || fail 'The HTTPS request through the proxy failed.'
+	umask 077
+	WORK="$(mktemp -d /tmp/krotex-check.XXXXXX)" || fail 'Unable to create temporary files for the connection check.'
+	result="$(curl --silent --show-error --fail --noproxy '' --proxy socks5h://127.0.0.1:10808 \
+		--connect-timeout 5 --max-time 12 --proto '=https' https://api.ipify.org 2> "$WORK/curl-error")"
+	curl_code=$?
+	if [ "$curl_code" -ne 0 ]; then
+		# Preserve the actual failure without exposing config or an unbounded log.
+		detail="$(head -c 512 "$WORK/curl-error" | tr -d '\000-\010\013\014\016-\037\177')"
+		json_init
+		json_add_int code 1
+		json_add_int curl_code "$curl_code"
+		json_add_string message "The HTTPS request through the proxy failed (curl exit $curl_code).${detail:+ $detail}"
+		json_dump
+		return
+	fi
 	case "$result" in ''|*[!0-9a-fA-F:.]*) fail 'The IP check returned an unexpected response.' ;; esac
 	json_init
 	json_add_int code 0
