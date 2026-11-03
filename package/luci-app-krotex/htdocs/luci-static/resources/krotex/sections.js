@@ -24,8 +24,9 @@ return baseclass.extend({
 		this.available = available;
 		var disabled = !!busy || !!this.saving || !!this.testing || !!this.resetting || !available || !this.loaded || !L.hasViewPermission();
 		(this.controls || []).forEach(function(control) { control.disabled = disabled || !!control.krotexBoundary; });
-		if (this.saveButton) this.saveButton.disabled = disabled || !this.dirty;
-		if (this.resetButton) this.resetButton.disabled = disabled || (!this.dirty && !this.sections.some(function(section) {
+		var pending = this.options.hasPendingChanges && this.options.hasPendingChanges();
+		if (this.saveButton) this.saveButton.disabled = disabled || (!this.dirty && !pending);
+		if (this.resetButton) this.resetButton.disabled = disabled || (!this.dirty && !pending && !this.sections.some(function(section) {
 			return section.mode === 'proxy' && section.editingConnection && section.url;
 		}));
 	},
@@ -158,8 +159,8 @@ return baseclass.extend({
 			mode.value = section.mode;
 			// Keep the native checkbox accessible, but hide theme-drawn pseudo-elements too.
 			var track = E('span', { 'aria-hidden': 'true',
-				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:999px;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
-			}, E('span', { 'style': 'position:absolute;top:.2em;bottom:.2em;' + (section.enabled ? 'right:.2em' : 'left:.2em') + ';aspect-ratio:1;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004' }));
+				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:4px;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
+			}, E('span', { 'style': 'position:absolute;top:.2em;bottom:.2em;' + (section.enabled ? 'right:.2em' : 'left:.2em') + ';aspect-ratio:1;border-radius:2px;background:#fff;box-shadow:0 1px 2px #0004' }));
 			var enabled = E('input', { 'type': 'checkbox', 'role': 'switch', 'aria-label': _('Enable section'),
 				'style': 'position:absolute;inset:0;display:block;box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;opacity:0;z-index:1;cursor:pointer',
 				'focus': function() { track.style.outline = '2px solid #52a8ec'; track.style.outlineOffset = '2px'; },
@@ -213,7 +214,9 @@ return baseclass.extend({
 								section.editingConnection = false;
 								this.dirty = this.legacyDirty || this.draftState() !== this.savedState;
 								this.renderCards();
-							}, this) }, '×');
+							}, this) }, [ -45, 45 ].map(function(angle) {
+							return E('span', { 'aria-hidden': 'true', 'style': 'position:absolute;width:.7em;height:2px;background:currentColor;transform:rotate(' + angle + 'deg);pointer-events:none' });
+						}));
 						this.controls.push(cancel);
 						link.style.paddingRight = '2.6em';
 						linkBox.replaceChildren(link, cancel);
@@ -281,7 +284,7 @@ return baseclass.extend({
 
 	test: function(section) {
 		if (this.externalBusy || this.saving || this.testing || !L.hasViewPermission()) return Promise.resolve();
-		if (this.dirty) { this.setCheckResult(section.id, _('Save sections before checking this connection.'), true); return Promise.resolve(); }
+		if (this.dirty || (this.options.hasPendingChanges && this.options.hasPendingChanges())) { this.setCheckResult(section.id, _('Save settings before checking this connection.'), true); return Promise.resolve(); }
 		this.testing = true;
 		if (this.options.onBusy) this.options.onBusy(true);
 		this.setState(this.externalBusy, this.available);
@@ -334,13 +337,13 @@ return baseclass.extend({
 	render: function() {
 		this.cards = E('div', {}, []);
 		this.result = E('p', { 'role': 'status', 'aria-live': 'polite' }, _('Loading sectionsâ€¦'));
-		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(this.add, this) }, _('Add section'));
+		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'style': 'margin-left:auto;flex:0 0 auto', 'click': L.bind(this.add, this) }, _('Add section'));
 		this.fallbackSelect = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Unmatched traffic'),
 			'style': 'min-width:0;max-width:100%', 'change': L.bind(this.handleFallbackChange, this)
 		}, []);
 		this.saveButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-apply cbi-button-positive',
-			'style': 'background:#218739;border-color:#1c7532;color:#fff', 'click': L.bind(this.save, this) }, _('Save sections and apply'));
-		this.resetButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-reset', 'click': L.bind(this.reset, this) }, _('Reset'));
+			'style': 'background:#218739;border-color:#1c7532;color:#fff', 'click': L.bind(this.options.onSave || this.save, this) }, _('Save and apply'));
+		this.resetButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-reset', 'click': L.bind(this.options.onReset || this.reset, this) }, _('Reset'));
 		this.topControls = [ addSection, this.saveButton, this.resetButton, this.fallbackSelect ];
 		this.controls = this.topControls.slice();
 		this.setState(false, this.available);
@@ -349,10 +352,10 @@ return baseclass.extend({
 			E('h3', {}, _('Routing sections')),
 			E('p', {}, _('Sections match domains from top to bottom. The first match wins. Choose the route for all remaining traffic below.')),
 			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
-			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [ addSection,
-				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ])
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
+				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
 			]), this.cards,
-			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
+			this.options.externalActions ? null : E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.options.externalActions ? null : this.result
 		]);
 	}
 });

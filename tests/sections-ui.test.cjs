@@ -69,7 +69,7 @@ test('section checks target their own saved VPN and cannot test unsaved edits',a
   await editor.test(editor.sections[0]);
   assert.deepEqual(state.checks,['vpn1']);assert.match(editor.checkOutputs.vpn1.textContent,/203.0.113.10/);
   editor.changed();await editor.test(editor.sections[0]);
-  assert.equal(state.checks.length,1);assert.match(editor.checkOutputs.vpn1.textContent,/Save sections/);
+  assert.equal(state.checks.length,1);assert.match(editor.checkOutputs.vpn1.textContent,/Save settings/);
 });
 
 test('connection results stay inside their own section and errors are red',async()=>{

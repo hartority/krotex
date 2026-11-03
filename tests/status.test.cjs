@@ -13,14 +13,19 @@ function harness(writable = true) {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
     notifications: [], actions: [], pollers: [], code: 0,
-    routing: { enabled: false, active: false, mode:'selected', macs: [] }, routingCalls: [], routingModeCalls: [], routingCode: 0
+    routing: { enabled: false, active: false, mode:'selected', macs: [] }, routingCalls: [], routingModeCalls: [], routingCode: 0, settingsCalls: [], draftSections: [], savedSections: []
   };
   const context = vm.createContext({
     setTimeout: fn => fn(),
     E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
       replaceChildren(...items) { this.children = items; } }),
     _: text => text,
-    sections: { create: () => ({ render: () => ({}), setState: () => {} }) },
+    sections: { create: () => ({
+      render: () => ({}), setState: () => {}, loaded:true, dirty:false,
+      saveButton:{}, resetButton:{}, result:{textContent:''},
+      serialize:()=>state.draftSections,
+      load:async()=>{state.draftSections=structuredClone(state.savedSections);state.view.sectionsEditor.dirty=false;}
+    }) },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
     rpc: { declare: spec => async (action, enabled) => {
@@ -30,6 +35,15 @@ function harness(writable = true) {
       }
       if (spec.method === 'devices') return { devices: [{ name: 'Phone', address: '192.168.1.10', mac: '02:11:22:33:44:55' }] };
       if (spec.method === 'routing') return state.routing;
+      if (spec.method === 'save_settings') {
+        state.settingsCalls.push({sections:JSON.parse(action),routing:JSON.parse(enabled)});
+        if (!state.routingCode) {
+          state.savedSections=JSON.parse(action);
+          const routing=JSON.parse(enabled);
+          state.routing={...routing,enabled:routing.mode==='all'||routing.macs.length>0,active:routing.mode==='all'||routing.macs.length>0};
+        }
+        return {code:state.routingCode,message:'Settings rejected'};
+      }
       if (spec.method === 'set_routing_mode') {
         state.routingModeCalls.push(action);
         if (!state.routingCode) state.routing={...state.routing,mode:action,enabled:action==='all'||state.routing.macs.length>0,active:action==='all'||state.routing.macs.length>0};
@@ -127,61 +141,74 @@ test('failed service command notifies the user and releases controls', async () 
 
 
 
-test('DHCP selection immediately adds a device to the visible routing list', async () => {
-  const state = harness();
-  await state.view.refreshDevices();
-  assert.equal(state.view.deviceSelect.children.length, 2);
-  state.view.deviceSelect.value = '02:11:22:33:44:55';
-  await state.view.deviceSelect.attrs.change();
-  assert.deepEqual(state.routingCalls, [{ mac: '02:11:22:33:44:55', enabled: true }]);
-  assert.equal(state.view.busy, false);
-  assert.equal(state.view.routingList.children.length, 1);
-  assert.equal(state.view.routingList.children[0].children[0].children[0].children,'Phone');
+
+test('DHCP selection stages a device without changing saved routing', async () => {
+  const state=harness(),view=state.view;await view.refreshRouting();await view.refreshDevices();
+  view.deviceSelect.value='02:11:22:33:44:55';await view.deviceSelect.attrs.change();
+  assert.deepEqual(state.routingCalls,[]);assert.equal(state.settingsCalls.length,0);
+  assert.equal(view.routingMacs.length,1);assert.equal(view.routingDirty,true);
+  assert.equal(state.routing.macs.length,0);
+  assert.equal(view.routingList.children[0].children[0].children[0].children,'Phone');
 });
 
-test('all-device mode hides selection and switching back retains selected devices',async()=>{
-  const state=harness();
-  await state.view.handleRouting(true,'02:11:22:33:44:55');
-  state.view.routingMode.value='all';await state.view.handleRoutingMode();
-  assert.equal(state.routing.mode,'all');
-  assert.equal(state.view.deviceSelection.style.display,'none');
-  assert.equal(state.view.allDevicesNotice.style.display,'');
-  assert.match(state.view.routingSummary.textContent,/All LAN devices/);
-  state.view.routingMode.value='selected';await state.view.handleRoutingMode();
-  assert.equal(state.view.deviceSelection.style.display,'');
-  assert.deepEqual(state.routing.macs,['02:11:22:33:44:55']);
-  assert.deepEqual(state.routingModeCalls,['all','selected']);
+test('mode and device drafts survive polling and apply together in one request',async()=>{
+  const state=harness(),view=state.view;await view.refreshRouting();
+  await view.handleRouting(true,'02:11:22:33:44:55');
+  view.routingMode.value='all';await view.handleRoutingMode();
+  await view.refresh();
+  assert.equal(view.routingMode.value,'all');assert.equal(view.routingMacs.length,1);
+  assert.equal(view.deviceSelection.style.display,'none');
+  assert.equal(state.routing.mode,'selected');assert.equal(state.settingsCalls.length,0);
+  state.draftSections=[{name:'VPN draft'}];view.sectionsEditor.dirty=true;
+  await view.handleSettingsSave();
+  assert.equal(state.settingsCalls.length,1);
+  assert.equal(state.settingsCalls[0].sections[0].name,'VPN draft');
+  assert.equal(state.routing.mode,'all');assert.equal(state.routing.macs.length,1);
+  assert.equal(view.routingDirty,false);assert.equal(view.sectionsEditor.dirty,false);
 });
 
-test('failed mode changes return the selector to the saved setting',async()=>{
-  const state=harness();await state.view.refreshRouting();
-  state.routingCode=1;state.view.routingMode.value='all';await state.view.handleRoutingMode();
-  assert.equal(state.view.routingMode.value,'selected');
-  assert.equal(state.routing.mode,'selected');assert.equal(state.view.busy,false);
+test('failed combined save retains both drafts for retry',async()=>{
+  const state=harness(),view=state.view;await view.refreshRouting();
+  await view.handleRouting(true,'02:11:22:33:44:55');
+  state.draftSections=[{name:'VPN draft'}];view.sectionsEditor.dirty=true;state.routingCode=1;
+  await view.handleSettingsSave();
+  assert.equal(view.routingMacs.length,1);assert.equal(view.routingDirty,true);
+  assert.equal(view.sectionsEditor.dirty,true);assert.equal(state.draftSections[0].name,'VPN draft');
+  assert.equal(state.routing.macs.length,0);assert.equal(view.sectionsEditor.result.textContent,'Settings rejected');
+  assert.equal(view.busy,false);
 });
 
-test('invalid MAC does not reach RPC and backend routing failure is displayed', async () => {
-  const state = harness();
-  state.view.routingMac.value = 'invalid';
-  await state.view.handleRouting(true);
-  assert.equal(state.routingCalls.length, 0);
-  state.view.routingMac.value = '02:11:22:33:44:55';
-  state.routingCode = 1;
-  await state.view.handleRouting(true);
-  assert.equal(state.view.routingResult.textContent, 'Routing rejected');
-  assert.equal(state.view.busy, false);
+test('Reset restores sections and routing without writing settings',async()=>{
+  const state=harness(),view=state.view;await view.refreshRouting();
+  await view.handleRouting(true,'02:11:22:33:44:55');
+  view.routingMode.value='all';await view.handleRoutingMode();
+  state.savedSections=[{name:'Saved VPN'}];state.draftSections=[{name:'Draft VPN'}];view.sectionsEditor.dirty=true;
+  await view.handleSettingsReset();
+  assert.equal(view.routingMacs.length,0);assert.equal(view.routingMode.value,'selected');
+  assert.equal(view.routingDirty,false);assert.equal(view.sectionsEditor.dirty,false);
+  assert.equal(state.draftSections[0].name,'Saved VPN');assert.equal(state.settingsCalls.length,0);
 });
 
-test('adding two devices preserves both, and the cross removes only its own device', async () => {
-  const state = harness();
-  await state.view.handleRouting(true, '02:11:22:33:44:55');
-  await state.view.handleRouting(true, '02:aa:bb:cc:dd:ee');
-  assert.equal(state.view.routingList.children.length, 2);
-  state.view.routingMac.value = 'invalid';
-  await state.view.routingRemoveButtons[0].attrs.click();
-  assert.deepEqual(state.routing.macs, ['02:aa:bb:cc:dd:ee']);
-  assert.equal(state.view.routingList.children.length, 1);
-  await state.view.routingRemoveButtons[0].attrs.click();
-  assert.equal(state.routing.enabled, false);
-  assert.equal(state.view.routingList.children[0].children, 'No devices added');
+test('invalid MACs never enter the draft and duplicate devices are ignored',async()=>{
+  const state=harness(),view=state.view;await view.refreshRouting();
+  for(const mac of ['invalid','00:00:00:00:00:00','01:11:22:33:44:55'])await view.handleRouting(true,mac);
+  assert.equal(view.routingMacs.length,0);assert.equal(state.notifications.length,3);
+  await view.handleRouting(true,'02:11:22:33:44:55');await view.handleRouting(true,'02:11:22:33:44:55');
+  assert.equal(view.routingMacs.length,1);assert.equal(state.settingsCalls.length,0);
+});
+
+test('remove stages only its own device and Reset restores the saved list',async()=>{
+  const state=harness(),view=state.view;
+  state.routing={mode:'selected',macs:['02:11:22:33:44:55','02:aa:bb:cc:dd:ee'],enabled:true,active:true};
+  await view.refreshRouting(true);
+  await view.routingRemoveButtons[0].attrs.click();
+  assert.deepEqual(Array.from(view.routingMacs),['02:aa:bb:cc:dd:ee']);
+  assert.equal(state.routing.macs.length,2);
+  await view.handleSettingsReset();assert.equal(view.routingMacs.length,2);
+});
+
+test('read-only callers cannot stage or save routing',async()=>{
+  const state=harness(false),view=state.view;await view.refreshRouting();
+  await view.handleRouting(true,'02:11:22:33:44:55');await view.handleSettingsSave();
+  assert.equal(view.routingMacs.length,0);assert.equal(state.settingsCalls.length,0);
 });

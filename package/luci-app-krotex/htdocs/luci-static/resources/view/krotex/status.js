@@ -20,8 +20,7 @@ var callAction = rpc.declare({
 
 var callDevices = rpc.declare({ object: 'krotex', method: 'devices', expect: { '': {} } });
 var callRouting = rpc.declare({ object: 'krotex', method: 'routing', expect: { '': {} } });
-var callSetRouting = rpc.declare({ object: 'krotex', method: 'set_routing', params: [ 'mac', 'enabled' ], expect: { '': {} } });
-var callSetRoutingMode = rpc.declare({ object: 'krotex', method: 'set_routing_mode', params: [ 'mode' ], expect: { '': {} } });
+var callSaveSettings = rpc.declare({ object: 'krotex', method: 'save_settings', params: [ 'sections', 'routing' ], expect: { '': {} } });
 
 return view.extend({
 	load: function() {
@@ -39,24 +38,74 @@ return view.extend({
 		}, this));
 	},
 
-	refreshRouting: function() {
+	refreshRouting: function(force) {
+		var revision = this.routingRevision || 0;
 		return callRouting().then(L.bind(function(data) {
+			if (revision !== (this.routingRevision || 0)) return;
 			if (data.code) throw new Error(data.message);
-			this.routingMacs = data.macs || (data.enabled && data.mac ? [ data.mac ] : []);
-			this.savedRoutingMode = data.mode || 'selected';
-			this.routingMode.value = this.savedRoutingMode;
-			var all = this.savedRoutingMode === 'all';
-			this.deviceSelection.style.display = all ? 'none' : '';
-			this.allDevicesNotice.style.display = all ? '' : 'none';
-			this.routingSummary.textContent = all ? (data.active ? _('All LAN devices · Active') : _('All LAN devices · Rules are inactive'))
-				: !data.enabled ? _('No devices selected')
-				: data.active ? _('Active devices: %s').format(this.routingMacs.length)
-				: _('Configured devices: %s; rules are inactive').format(this.routingMacs.length);
-			if (data.active && !this.lastStatus.running)
-				this.routingSummary.textContent += ' · ' + _('Xray is stopped');
-			this.renderRoutingDevices();
-		}, this)).catch(L.bind(function() {
+			this.routingStatus = data;
+			if (force || !this.routingLoaded || !this.routingDirty) {
+				this.routingMacs = (data.macs || (data.enabled && data.mac ? [ data.mac ] : [])).slice();
+				this.savedRoutingMacs = this.routingMacs.slice();
+				this.savedRoutingMode = data.mode || 'selected';
+				this.routingMode.value = this.savedRoutingMode;
+				this.routingDirty = false;
+			}
+			this.routingLoaded = true;
+			this.updateRoutingDraft();
+		}, this)).catch(L.bind(function(error) {
 			this.routingSummary.textContent = _('Device routing status unavailable');
+			if (force) throw error;
+		}, this));
+	},
+
+	updateRoutingDraft: function() {
+		var all = this.routingMode.value === 'all';
+		this.routingDirty = this.routingMode.value !== this.savedRoutingMode || JSON.stringify(this.routingMacs) !== JSON.stringify(this.savedRoutingMacs || []);
+		this.deviceSelection.style.display = all ? 'none' : '';
+		this.allDevicesNotice.style.display = all ? '' : 'none';
+		this.routingSummary.textContent = all ? _('All LAN devices') : _('Selected devices: %s').format(this.routingMacs.length);
+		this.routingSummary.textContent += ' \u00b7 ' + (this.routingDirty ? _('Unsaved changes') : this.routingStatus && this.routingStatus.active ? _('Active') : _('Rules are inactive'));
+		this.renderRoutingDevices();
+	},
+
+	handleSettingsSave: function() {
+		if (this.busy || !this.routingLoaded || !L.hasViewPermission()) return Promise.resolve();
+		var editor = this.sectionsEditor, serialized;
+		try { serialized = JSON.stringify(editor.serialize()); }
+		catch (error) { editor.result.textContent = error.message; return Promise.resolve(); }
+		this.routingRevision = (this.routingRevision || 0) + 1;
+		this.busy = true;
+		this.updateStatus(this.lastStatus);
+		editor.result.textContent = _('Applying settings...');
+		return callSaveSettings(serialized, JSON.stringify({ mode: this.routingMode.value, macs: this.routingMacs })).then(L.bind(function(result) {
+			if (result.code !== 0) throw new Error(result.message || _('Unable to apply settings.'));
+			return Promise.all([ editor.load(), this.refreshRouting(true) ]).then(function() {
+				editor.result.textContent = _('Settings saved and applied.');
+			});
+		}, this)).catch(function(error) {
+			editor.result.textContent = error.message;
+			ui.addNotification(null, E('p', {}, error.message));
+		}).then(L.bind(function() {
+			this.busy = false;
+			this.updateStatus(this.lastStatus);
+		}, this));
+	},
+
+	handleSettingsReset: function() {
+		if (this.busy || !this.routingLoaded || !L.hasViewPermission()) return Promise.resolve();
+		this.routingRevision = (this.routingRevision || 0) + 1;
+		this.busy = true;
+		this.updateStatus(this.lastStatus);
+		return Promise.all([ this.sectionsEditor.load(), this.refreshRouting(true) ]).then(L.bind(function() {
+			this.sectionsEditor.result.textContent = '';
+			this.routingMac.value = '';
+			this.deviceSelect.value = '';
+		}, this)).catch(L.bind(function(error) {
+			this.sectionsEditor.result.textContent = error.message;
+		}, this)).then(L.bind(function() {
+			this.busy = false;
+			this.updateStatus(this.lastStatus);
 		}, this));
 	},
 
@@ -85,22 +134,11 @@ return view.extend({
 	},
 
 	handleRoutingMode: function() {
-		if (this.busy) return Promise.resolve();
-		var mode = this.routingMode.value;
-		if ([ 'all', 'selected' ].indexOf(mode) === -1) return Promise.resolve();
-		this.busy = true;
-		this.updateStatus(this.lastStatus);
-		this.routingResult.textContent = _('Applying device routing…');
-		return callSetRoutingMode(mode).then(L.bind(function(result) {
-			if (result.code !== 0) throw new Error(result.message || _('Unable to change routing mode.'));
-			this.routingResult.textContent = _('Routing mode applied.');
-		}, this)).catch(L.bind(function(error) {
-			this.routingResult.textContent = error.message;
-			ui.addNotification(null, E('p', {}, error.message));
-		}, this)).then(L.bind(function() {
-			this.busy = false;
-			return this.refresh();
-		}, this));
+		if (this.busy || !this.routingLoaded || !L.hasViewPermission()) return Promise.resolve();
+		if ([ 'all', 'selected' ].indexOf(this.routingMode.value) === -1) return Promise.resolve();
+		this.routingRevision = (this.routingRevision || 0) + 1;
+		this.updateRoutingDraft();
+		return Promise.resolve();
 	},
 
 	handleRemoveDevice: function(mac) {
@@ -123,31 +161,28 @@ return view.extend({
 	},
 
 	handleRouting: function(enabled, selectedMac) {
-		if (this.busy)
+		if (this.busy || !this.routingLoaded || !L.hasViewPermission())
 			return Promise.resolve();
 		var mac = (selectedMac || this.routingMac.value).trim().toLowerCase();
-		if (!/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) {
+		if (!/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac) || mac === '00:00:00:00:00:00' || (parseInt(mac.slice(0, 2), 16) & 1)) {
 			ui.addNotification(null, E('p', {}, _('Enter a valid device MAC address.')));
 			return Promise.resolve();
 		}
-		this.busy = true;
-		this.updateStatus(this.lastStatus);
-		this.routingResult.textContent = _('Applying device routing…');
-		return callSetRouting(mac, enabled).then(L.bind(function(result) {
-			if (result.code !== 0)
-				throw new Error(result.message || _('Unable to apply device routing.'));
-			this.routingResult.textContent = enabled ? _('Device added.') : _('Device removed.');
-			if (enabled) {
-				this.routingMac.value = '';
-				this.deviceSelect.value = '';
+		var macs = this.routingMacs.filter(function(item) { return item !== mac; });
+		if (enabled) {
+			if (this.routingMacs.indexOf(mac) >= 0) return Promise.resolve();
+			if (macs.length >= 128) {
+				ui.addNotification(null, E('p', {}, _('A maximum of 128 devices is supported.')));
+				return Promise.resolve();
 			}
-		}, this)).catch(L.bind(function(error) {
-			this.routingResult.textContent = error.message;
-			ui.addNotification(null, E('p', {}, error.message));
-		}, this)).then(L.bind(function() {
-			this.busy = false;
-			return this.refresh();
-		}, this));
+			macs.push(mac);
+			this.routingMac.value = '';
+			this.deviceSelect.value = '';
+		}
+		this.routingMacs = macs;
+		this.routingRevision = (this.routingRevision || 0) + 1;
+		this.updateRoutingDraft();
+		return Promise.resolve();
 	},
 
 	updateStatus: function(data) {
@@ -174,10 +209,10 @@ return view.extend({
 		this.buttons.concat(this.routingRemoveButtons || []).forEach(L.bind(function(button) {
 			button.disabled = !!this.busy || !available || !L.hasViewPermission();
 		}, this));
-		this.routingMac.disabled = !!this.busy || !available || !L.hasViewPermission();
+		this.routingMac.disabled = !!this.busy || !this.routingLoaded || !available || !L.hasViewPermission();
 		this.deviceSelect.disabled = this.routingMac.disabled;
 		this.routingMode.disabled = this.routingMac.disabled;
-		if (this.sectionsEditor) this.sectionsEditor.setState(!!this.busy, available);
+		if (this.sectionsEditor) this.sectionsEditor.setState(!!this.busy || !this.routingLoaded, available);
 	},
 
 	handleAction: function(action) {
@@ -200,6 +235,9 @@ return view.extend({
 		this.fields = {};
 		this.buttons = [];
 		this.routingMacs = [];
+		this.savedRoutingMacs = [];
+		this.routingDirty = false;
+		this.routingLoaded = false;
 		this.devices = [];
 		this.routingList = E('ul', { 'style': 'list-style:none;padding:0;margin:1em 0;color:inherit' }, []);
 		this.savedRoutingMode = 'selected';
@@ -210,7 +248,6 @@ return view.extend({
 		this.allDevicesNotice = E('div', { 'style': 'display:none;margin:1em 0;padding:1em;border:1px solid #409eff66;border-radius:8px;background:rgba(64,158,255,.08)' },
 			_('All devices in the LAN firewall zone follow the routing sections, including newly connected devices. Your selected-device list is preserved.'));
 		this.routingSummary = E('p', { 'style': 'margin:.75em 0 1em' }, _('Loading device routing…'));
-		this.routingResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.routingMac = E('input', {
 			'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff',
 			'aria-label': _('Device MAC address'), 'autocomplete': 'off', 'spellcheck': 'false'
@@ -285,6 +322,10 @@ return view.extend({
 		]);
 
 		this.sectionsEditor = sections.create({
+			externalActions: true,
+			hasPendingChanges: L.bind(function() { return !!this.routingDirty; }, this),
+			onSave: L.bind(this.handleSettingsSave, this),
+			onReset: L.bind(this.handleSettingsReset, this),
 			onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this),
 			onApplied: L.bind(this.refresh, this)
 		});
@@ -299,10 +340,11 @@ return view.extend({
 				this.routingSummary,
 				this.allDevicesNotice,
 				this.deviceSelection,
-				this.routingResult,
 				E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
-				E('p', {}, _('Reconnect devices after adding them. Removing a device or stopping Krotex restores direct access.'))
-			])
+				E('p', {}, _('Save and apply the changes below. Reconnect devices after applying routing changes. Stopping Krotex restores direct access.'))
+			]),
+			E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton ]),
+			this.sectionsEditor.result
 		]);
 		this.updateStatus(data);
 		this.refreshRouting();

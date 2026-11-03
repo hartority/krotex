@@ -231,7 +231,7 @@ cat > "$WORK/firewall" <<EOF
 #!/bin/sh
 case "\$1" in
   status) test -f "$WORK/routing-active" ;;
-  apply)
+  apply|start)
     if [ -f "$WORK/routing-fail" ]; then rm "$WORK/routing-fail"; exit 1; fi
     if grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$WORK/routing.json"; then
       touch "$WORK/routing-active"
@@ -356,6 +356,8 @@ sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
 	-e "s|/usr/libexec/krotex/xray|$TEST_ROOT/private-xray|g" \
 	-e "s|/var/lock/krotex-setup.lock|$TEST_ROOT/var/lock/krotex-setup.lock|g" \
+	-e "s|$TEST_ROOT/etc/krotex/routing.json|$WORK/routing.json|g" \
+	-e "s|/usr/libexec/krotex/firewall|$WORK/firewall|g" \
 	-e "s|/usr/share/krotex/sections.uc|$(pwd)/package/krotex/files/sections.uc|g" \
 	-e "s|/usr/share/krotex/transparent.json|$WORK/transparent.json|g" \
 	package/luci-app-krotex/root/usr/libexec/krotex/sections > "$WORK/sections"
@@ -478,3 +480,56 @@ json_load "$(cat "$WORK/result")"
 json_get_var enabled enabled
 test "$enabled" = 0
 echo 'PASS: legacy disable also stops all-device routing and disabled status remains accurate'
+
+
+# The page sends one transaction for sections and the entire routing scope.
+settings_request() {
+	json_init
+	json_add_string sections "$sections"
+	json_add_string routing "$routing"
+	json_dump > "$WORK/request"
+}
+sections='[{"id":"direct","name":"Direct","mode":"direct","enabled":true,"fallback":true,"domains":["example.com"]}]'
+routing='{"mode":"all","macs":["02:AA:BB:CC:DD:EE","02:aa:bb:cc:dd:ee"]}'
+settings_request
+call_sections save_settings
+expect_code 0
+json_load "$(cat "$WORK/routing.json")"
+json_get_var mode mode
+json_get_var enabled enabled
+test "$mode" = all && test "$enabled" = 1
+json_select macs; json_get_keys keys; set -- $keys
+test "$#" -eq 1
+json_get_var mac 1; test "$mac" = 02:aa:bb:cc:dd:ee
+test -f "$WORK/routing-active"
+cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/settings-core"
+cp "$WORK/routing.json" "$WORK/settings-routing"
+echo 'PASS: unified settings save validates and applies sections, mode and normalized device list'
+
+sections='[]'
+for routing in '{"mode":"wan","macs":[]}' '{"mode":"selected","macs":["01:11:22:33:44:55"]}' '{"mode":"all","macs":["00:00:00:00:00:00"]}' '{"mode":"selected","macs":"invalid"}'; do
+	settings_request; call_sections save_settings; expect_code 1
+	cmp "$WORK/settings-core" "$TEST_ROOT/etc/krotex/config.json"
+	cmp "$WORK/settings-routing" "$WORK/routing.json"
+done
+echo 'PASS: invalid routing leaves both saved configurations unchanged'
+
+routing='{"mode":"selected","macs":[]}'
+settings_request
+touch "$TEST_ROOT/fail-start"
+call_sections save_settings; expect_code 1
+cmp "$WORK/settings-core" "$TEST_ROOT/etc/krotex/config.json"
+cmp "$WORK/settings-routing" "$WORK/routing.json"
+test -f "$TEST_ROOT/running"
+touch "$WORK/routing-fail"
+call_sections save_settings; expect_code 1
+cmp "$WORK/settings-core" "$TEST_ROOT/etc/krotex/config.json"
+cmp "$WORK/settings-routing" "$WORK/routing.json"
+test -f "$TEST_ROOT/running"
+echo 'PASS: startup and firewall failures roll back sections and routing together'
+
+call_sections save_settings; expect_code 0
+test ! -f "$WORK/routing-active"
+json_load "$(cat "$WORK/routing.json")"; json_get_var enabled enabled
+test "$enabled" = 0
+echo 'PASS: unified save can clear sections and disable all device routing together'

@@ -10,9 +10,10 @@ const { test } = require('node:test');
 test('sections, full VLESS links and multiple devices work in Chromium', () => {
   const work = mkdtempSync(join(tmpdir(), 'krotex-browser-'));
   try {
-    const view = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'), 'utf8');
-    const vless = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'), 'utf8');
-    const sections = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'), 'utf8');
+    const utf8 = path => new TextDecoder('utf-8', {fatal:true}).decode(readFileSync(path));
+    const view = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'));
+    const vless = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'));
+    const sections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'));
     const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace}
       /* LuCI Bootstrap draws its own checkbox using pseudo-elements. */
       input[type=checkbox]::before,input[type=checkbox]::after{position:absolute;content:""}
@@ -29,7 +30,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           // particular selected="false" still selects an HTML option.
           else if (value != null) element.setAttribute(key, typeof value === 'object' ? JSON.stringify(value) : value);
         }
-        if (children != null) element.append(...(Array.isArray(children) ? children : [children]));
+        if (children != null) element.append(...(Array.isArray(children) ? children : [children]).filter(child=>child!=null));
         return element;
       };
       const L = { bind:(fn,self,...args)=>fn.bind(self,...args), hasViewPermission:()=>true };
@@ -41,12 +42,16 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
       let macs = [];
       let routingMode='selected';
-      let checkFailure = false;
+      let checkFailure = false,saveFailure=false,saveCalls=0;
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
         if(spec.method==='status') return {available:true,installed:true,running:true};
         if(spec.method==='sections') return {sections:saved};
-        if(spec.method==='save_sections') { saved=JSON.parse(mac);return {code:0}; }
+        if(spec.method==='save_settings') {
+          saveCalls++;
+          if(saveFailure)return {code:1,message:'Settings rejected'};
+          saved=JSON.parse(mac);const routing=JSON.parse(enabled);routingMode=routing.mode;macs=routing.macs;return {code:0};
+        }
         if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10'};
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
         if(spec.method==='routing') return {mode:routingMode,macs:macs.slice(),enabled:routingMode==='all'||!!macs.length,active:routingMode==='all'||!!macs.length};
@@ -76,7 +81,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(input.clientHeight>500,'long link was not expanded');
           const cancel=document.querySelector('[aria-label="Cancel VLESS editing"]');
           check(cancel,'VLESS editing has no Cancel button');
-          check(cancel.textContent==='×','Cancel is not a compact cross');
+          check(cancel.querySelectorAll('span[aria-hidden="true"]').length===2&&!cancel.textContent,'Cancel must draw its cross without font glyphs');
           const textboxBounds=input.getBoundingClientRect(),cancelBounds=cancel.getBoundingClientRect();
           check(cancelBounds.top>=textboxBounds.top&&cancelBounds.top<textboxBounds.top+12&&cancelBounds.right<=textboxBounds.right&&cancelBounds.right>textboxBounds.right-12,'Cancel is not inside the top-right of the textbox');
           check(getComputedStyle(cancel).color==='rgb(217, 48, 37)','Cancel cross is not red');
@@ -99,7 +104,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           editor.topControls[0].click();
           check(route(1).value==='unconfigured'&&!editor.sections[1].enabled,'new section has a configured route');
           check(card(1).querySelector('input[aria-label="Enable section"]').disabled,'unconfigured section can be enabled');
-          await editor.save();
+          await page.handleSettingsSave();
           check(route(1).value==='unconfigured','unconfigured section did not survive reopening');
           choose(1,'direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com';editor.move(1,-1);
           check(editor.cards.children[0].querySelector('select[aria-label="Section route"]').value==='direct','Direct section is displayed as Xray');
@@ -125,7 +130,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           card(2).querySelector('[role="switch"]').click();
           check(editor.sections[2].enabled,'switch does not re-enable the section');
           editor.fallbackSelect.value=editor.sections[2].id;editor.fallbackSelect.dispatchEvent(new Event('change'));
-          await editor.save();
+          await page.handleSettingsSave();
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
           check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
           check(saved[2].profile.url===link,'section link was not retained');
@@ -155,6 +160,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(editor.fallbackSelect.value===saved[2].id,'saved default VPN is not selected in the shared list');
           check(editor.fallbackSelect.parentElement.parentElement===editor.topControls[0].parentElement,'default selector is not beside Add section');
           document.body.style.width='1000px';
+          const addBounds=editor.topControls[0].getBoundingClientRect();
+          check(Math.abs(addBounds.right-editor.topControls[0].parentElement.getBoundingClientRect().right)<2,'Add section is not at the right edge');
           const heading=page.pageHeader.querySelector('h2').getBoundingClientRect();
           const actions=page.serviceActions.getBoundingClientRect();
           check(actions.left>heading.right&&Math.abs(actions.y-heading.y)<30,'service controls are not beside the heading');
@@ -170,7 +177,13 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           await pause();
           page.routingMac.value=mac2;
           await page.handleRouting(true);
-          check(page.routingList.children.length===2 && macs.length===2,'second device replaced first');
+          check(page.routingList.children.length===2 && page.routingMacs.length===2,'second device replaced first');
+          check(macs.length===0,'device changes applied before Save');
+          await page.refresh();
+          check(page.routingMacs.length===2,'polling overwrote the device draft');
+          const settingsActions=document.querySelector('[aria-label="Settings actions"]');
+          check(settingsActions.nextElementSibling===editor.result&&!editor.result.nextElementSibling,'settings actions are not at the bottom');
+          check(!editor.saveButton.disabled&&!editor.resetButton.disabled,'device draft did not enable Save and Reset');
           const deviceName=page.routingList.querySelector('strong');
           check(deviceName.textContent==='Laptop','device card lacks a readable name');
           check(page.routingList.textContent.includes('192.168.1.10')&&page.routingList.textContent.includes(mac1),'device card lost addresses');
@@ -179,16 +192,27 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           document.body.style.color='#222';document.body.style.background='#fff';
           check(getComputedStyle(deviceName).color==='rgb(34, 34, 34)','device name is unreadable in light mode');
           page.routingMode.value='all';page.routingMode.dispatchEvent(new Event('change'));await pause();
-          check(routingMode==='all'&&getComputedStyle(page.deviceSelection).display==='none','all mode did not hide device selection');
+          check(routingMode==='selected'&&page.routingMode.value==='all'&&getComputedStyle(page.deviceSelection).display==='none','all mode did not hide device selection');
           check(getComputedStyle(page.allDevicesNotice).display!=='none','all mode lacks a description');
           check(getComputedStyle(page.allDevicesNotice).borderLeftWidth===getComputedStyle(page.allDevicesNotice).borderRightWidth,'notice still has a thick left border');
           check(page.routingSummary.getBoundingClientRect().top-page.routingMode.getBoundingClientRect().bottom>=10,'routing status touches the mode selector');
           page.routingMode.value='selected';page.routingMode.dispatchEvent(new Event('change'));await pause();
-          check(macs.length===2&&page.routingList.children.length===2,'switching modes lost the saved device list');
+          check(page.routingMacs.length===2&&page.routingList.children.length===2,'switching modes lost the draft device list');
+          editor.sections[0].name='Draft exclude';editor.changed();
+          saveFailure=true;await page.handleSettingsSave();
+          check(page.routingMacs.length===2&&editor.dirty&&editor.result.textContent==='Settings rejected','failed Save lost drafts');
+          check(macs.length===0,'failed Save changed saved devices');
+          saveFailure=false;const callsBefore=saveCalls;
+          editor.saveButton.click();await pause();
+          check(saveCalls===callsBefore+1&&macs.length===2&&saved[0].name==='Draft exclude','Save did not apply sections and devices in one request');
+          check(!editor.dirty&&!page.routingDirty&&editor.saveButton.disabled,'successful Save left dirty state');
           page.routingRemoveButtons[0].click();
           await pause();
-          check(macs.length===1 && macs[0]===mac2,'cross removed wrong device');
+          check(page.routingMacs.length===1 && page.routingMacs[0]===mac2&&macs.length===2,'cross did not stage removal of its own device');
           check(page.routingList.children.length===1,'removed device remains visible');
+          editor.sections[0].name='Discard this';editor.changed();
+          editor.resetButton.click();await pause();
+          check(page.routingMacs.length===2&&!page.routingDirty&&editor.sections[0].name==='Draft exclude'&&!editor.dirty,'Reset did not restore both sections and devices');
           document.body.dataset.testResult='pass';
         } catch(error) { document.body.dataset.testResult='fail'; document.body.append(error.stack); }
       });

@@ -169,6 +169,20 @@ try {
 		}
 		check(found, 'Save this Xray section before checking its connection.');
 	}
+	else if (ARGV[0] == 'routing') {
+		let request = json(readfile(ARGV[2], 262145));
+		check(type(request.routing) == 'string', 'Invalid device routing request.');
+		let routing = json(request.routing);
+		check(type(routing) == 'object' && (routing.mode == 'all' || routing.mode == 'selected'), 'Invalid routing mode.');
+		check(type(routing.macs) == 'array' && length(routing.macs) <= 128, 'A maximum of 128 devices is supported.');
+		let macs = [], seen = {};
+		for (let value in routing.macs) {
+			let mac = lc(text(value, 17, 'MAC address'));
+			check(match(mac, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/) && mac != '00:00:00:00:00:00' && !match(mac, /^[0-9a-f][13579bdf]:/), 'Enter a valid unicast device MAC address.');
+			if (!seen[mac]) { seen[mac] = true; push(macs, mac); }
+		}
+		printf('%J\n', { mode: routing.mode, macs, enabled: routing.mode == 'all' || length(macs) > 0 });
+	}
 	else if (ARGV[0] == 'compile') {
 		let request = json(readfile(ARGV[2], 262145));
 		check(type(request.sections) == 'string', 'Invalid sections request.');

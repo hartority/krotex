@@ -2,6 +2,9 @@
 . /usr/share/libubox/jshn.sh
 _json_no_warning=1
 CONFIG=/etc/krotex/config.json
+ROUTING=/etc/krotex/routing.json
+FIREWALL=/usr/libexec/krotex/firewall
+METHOD=$1
 COMPILER=/usr/share/krotex/sections.uc
 INIT=/etc/init.d/krotex
 PROG=/usr/bin/xray
@@ -22,7 +25,12 @@ fail() { reply 1 "$1"; exit 0; }
 cleanup() {
 	if [ "$CHANGED" -eq 1 ]; then
 		"$INIT" stop >/dev/null 2>&1
-		if mv "$WORK/previous.json" "$CONFIG"; then
+		recovered=1
+		mv "$WORK/previous.json" "$CONFIG" || recovered=0
+		if [ "$METHOD" = save_settings ]; then
+			mv "$WORK/previous-routing.json" "$ROUTING" || recovered=0
+		fi
+		if [ "$recovered" -eq 1 ]; then
 			[ "$WAS_RUNNING" -eq 0 ] || "$INIT" start >/dev/null 2>&1
 		else
 			printf '[Krotex] Recovery retained at %s\n' "$WORK/previous.json" >&2
@@ -39,7 +47,7 @@ if [ "$1" = sections ]; then
 	ucode "$COMPILER" read "$CONFIG" || reply 1 'Unable to read sections.'
 	exit 0
 fi
-case "$1" in save_sections|test_section) ;; *) exit 2 ;; esac
+case "$1" in save_settings|save_sections|test_section) ;; *) exit 2 ;; esac
 mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
 LOCKED=1
 umask 077
@@ -65,6 +73,9 @@ if [ "$1" = test_section ]; then
 	exit 0
 fi
 ucode "$COMPILER" compile "$CONFIG" "$WORK/request.json" > "$WORK/new.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+if [ "$METHOD" = save_settings ]; then
+	ucode "$COMPILER" routing "$CONFIG" "$WORK/request.json" > "$WORK/new-routing.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+fi
 "$PROG" run -test -config /usr/share/krotex/transparent.json -config "$WORK/new.json" > "$WORK/validation" 2>&1 || fail 'Xray rejected the sections. Check the connection settings.'
 services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || fail 'Unable to query procd.'
 json_load "$services" || fail 'Unable to query procd.'
@@ -73,8 +84,14 @@ if json_select krotex && json_select instances && json_select main; then
 	[ "$active" != 1 ] || WAS_RUNNING=1
 fi
 cp "$CONFIG" "$WORK/previous.json" || fail 'Unable to back up the configuration.'
-mv "$WORK/new.json" "$CONFIG" || fail 'Unable to save sections.'
+if [ "$METHOD" = save_settings ]; then
+	cp "$ROUTING" "$WORK/previous-routing.json" || fail 'Unable to back up device routing.'
+fi
 CHANGED=1
+mv "$WORK/new.json" "$CONFIG" || fail 'Unable to save sections.'
+if [ "$METHOD" = save_settings ]; then
+	mv "$WORK/new-routing.json" "$ROUTING" || fail 'Unable to save device routing.'
+fi
 "$INIT" restart > "$WORK/start" 2>&1 || fail 'Xray failed to start; restoring the previous sections.'
 ready=0
 for attempt in 1 2 3 4 5; do
@@ -86,5 +103,8 @@ for attempt in 1 2 3 4 5; do
 	fi
 done
 [ "$ready" -eq 1 ] || fail 'Xray did not start; restoring the previous sections.'
+if [ "$METHOD" = save_settings ]; then
+	"$FIREWALL" start > "$WORK/firewall-error" 2>&1 || fail 'Unable to apply device routing; restoring the previous settings.'
+fi
 CHANGED=0
-reply 0 'Sections saved and applied.'
+reply 0 'Settings saved and applied.'
