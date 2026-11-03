@@ -564,3 +564,17 @@ test "$mode" = block
 printf '{"id":"deny"}\n' > "$WORK/request"
 call_sections test_section; expect_code 1
 echo 'PASS: unified settings saves and reopens Block without VLESS and rejects proxy checks on it'
+
+
+sections='[{"id":"deny","name":"Blocked sites","mode":"block","enabled":true,"fallback":false,"domains":["ignored.example"],"domains_text":"#ip-api.com\nexample.com"}]'
+settings_request
+call_sections save_settings; expect_code 0
+call_sections sections
+json_load "$(cat "$WORK/result")"; json_select sections; json_select 1
+json_get_var domain_text domains_text
+test "$domain_text" = "$(printf '#ip-api.com\nexample.com')"
+json_select domains; json_get_var domain 1
+test "$domain" = example.com
+json_load "$(cat "$TEST_ROOT/etc/krotex/config.json")"; json_select routing; json_select rules; json_select 2; json_select domain; json_get_var domain 1
+test "$domain" = domain:example.com
+echo 'PASS: unified save preserves commented domain text while Xray only receives active domains'

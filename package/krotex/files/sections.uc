@@ -97,8 +97,12 @@ function normalize(input) {
 			check(++defaults == 1, 'Only one section can handle unmatched traffic.');
 		}
 		check(type(item.domains) == 'array', 'Enter a list of domains.');
+		let source = item.domains;
+		if (item.domains_text != null)
+			source = split(text(item.domains_text, 131072, 'domain list text'), '\n');
 		let domains = [], seen = {};
-		for (let value in item.domains) {
+		for (let value in source) {
+			if (item.domains_text != null && (!length(trim(value)) || match(trim(value), /^#/))) continue;
 			let domain = lc(trim(text(value, 253, 'domain')));
 			domain = replace(domain, /^\*\./, '');
 			domain = replace(domain, /\.$/, '');
@@ -111,6 +115,7 @@ function normalize(input) {
 			push(domains, domain);
 		}
 		let section = { id, name, mode: item.mode, enabled: item.enabled, fallback: item.fallback, domains };
+		if (item.domains_text != null) section.domains_text = item.domains_text;
 		if (item.mode == 'proxy' && (item.enabled || item.profile != null)) section.profile = proxy_profile(item.profile);
 		push(sections, section);
 	}

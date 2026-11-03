@@ -120,3 +120,21 @@ test('Block uses blackhole while preserving priority, subdomains and optional un
     } finally {rmSync(work,{recursive:true,force:true});}
   }
 });
+
+
+test('comments persist as editor text and never become Xray domain rules', {skip:!runtime}, () => {
+  const source='#ip-api.com\n\n  # disabled domain\nExample.com\n  *.Example.com  \n';
+  const config=run('compile',[{...section('deny','block',['ignored.example']),domains_text:source}]);
+  assert.equal(config.krotex_sections[0].domains_text,source);
+  assert.deepEqual(config.krotex_sections[0].domains,['example.com']);
+  assert.deepEqual(config.routing.rules.find(r=>r.domain).domain,['domain:example.com']);
+  const reopened=run('read',[],config).sections[0];
+  assert.equal(reopened.domains_text,source);
+  const savedAgain=run('compile',[reopened]);
+  assert.equal(savedAgain.krotex_sections[0].domains_text,source);
+  const commentsOnly=run('compile',[{...section('deny','block'),domains_text:'#ip-api.com\n'}]);
+  assert.deepEqual(commentsOnly.krotex_sections[0].domains,[]);
+  assert.equal(commentsOnly.routing.rules.some(r=>r.domain),false);
+  assert.throws(()=>run('compile',[{...section('deny','block'),domains_text:'#comment\nhttps://bad.example/path'}]));
+  assert.throws(()=>run('compile',[{...section('deny','block'),domains_text:123}]));
+});

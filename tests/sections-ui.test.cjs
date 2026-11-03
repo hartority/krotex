@@ -241,3 +241,14 @@ test('Block configures domains without VLESS and saves through the shared sectio
   assert.equal(state.saved[0][1].profile,undefined);
   assert.equal(controls(editor,'Section route')[1].value,'block');
 });
+
+
+test('domain comments, blank lines and spacing survive save and reload',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  const source='#ip-api.com\n\n  # temporarily disabled\nExample.com\n  youtube.com  \n';
+  controls(editor,'Domains')[0].attrs.input({target:{value:source}});
+  await editor.save();
+  assert.equal(state.saved[0][0].domains_text,source);
+  assert.equal(editor.sections[0].domains,source);
+  assert.equal(controls(editor,'Domains')[0].value,source);
+});

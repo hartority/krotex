@@ -51,7 +51,7 @@ return baseclass.extend({
 				var url = section.profile ? (section.profile.url || vless.format(section.profile)) : '';
 				return { id: section.id, name: section.name, mode: section.mode,
 					enabled: section.enabled, fallback: section.fallback,
-					domains: (section.domains || []).join('\n'),
+					domains: typeof section.domains_text === 'string' ? section.domains_text : (section.domains || []).join('\n'),
 					url: url, editingConnection: !url };
 			});
 			this.loaded = true;
@@ -307,7 +307,7 @@ return baseclass.extend({
 
 	serialize: function() {
 		return this.sections.map(function(section) {
-			var data = { id: section.id, name: section.name, mode: section.mode, enabled: section.enabled, fallback: section.fallback,
+			var data = { id: section.id, name: section.name, mode: section.mode, enabled: section.enabled, fallback: section.fallback, domains_text: section.domains,
 				domains: section.domains.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(function(line) { return line && line.charAt(0) !== '#'; }) };
 			if (section.mode === 'proxy' && (section.enabled || section.url.trim())) {
 				try { data.profile = vless.inspect(section.url).profile; data.profile.url = section.url.trim(); }
