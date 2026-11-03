@@ -14,6 +14,7 @@ return baseclass.extend({
 		editor.options = options || {};
 		editor.sections = [];
 		editor.controls = [];
+		editor.checkResults = Object.create(null);
 		editor.available = false;
 		return editor;
 	},
@@ -21,13 +22,16 @@ return baseclass.extend({
 	setState: function(busy, available) {
 		this.externalBusy = busy;
 		this.available = available;
-		var disabled = !!busy || !!this.saving || !!this.testing || !available || !this.loaded || !L.hasViewPermission();
+		var disabled = !!busy || !!this.saving || !!this.testing || !!this.resetting || !available || !this.loaded || !L.hasViewPermission();
 		(this.controls || []).forEach(function(control) { control.disabled = disabled || !!control.krotexBoundary; });
 		if (this.saveButton) this.saveButton.disabled = disabled || !this.dirty;
+		if (this.resetButton) this.resetButton.disabled = disabled || !this.dirty;
 	},
 
 	changed: function() {
 		this.dirty = true;
+		this.checkResults = Object.create(null);
+		Object.keys(this.checkOutputs || {}).forEach(L.bind(function(id) { this.setCheckResult(id, '', false); }, this));
 		this.setState(this.externalBusy, this.available);
 	},
 
@@ -42,6 +46,7 @@ return baseclass.extend({
 			});
 			this.loaded = true;
 			this.dirty = !!data.legacy;
+			this.checkResults = Object.create(null);
 			this.renderCards();
 		}, this)).catch(L.bind(function(error) {
 			this.result.textContent = error.message || _('Unable to load sections.');
@@ -98,6 +103,7 @@ return baseclass.extend({
 
 	renderCards: function() {
 		this.controls = this.topControls.slice();
+		this.checkOutputs = Object.create(null);
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
 				'maxlength': 128, 'aria-label': _('Section name'), 'style': 'flex:1;min-width:0;width:auto',
@@ -153,12 +159,18 @@ return baseclass.extend({
 				link.value = section.url;
 				this.controls.push(link);
 				var test = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(function() { return this.test(section); }, this) }, _('Check connection'));
+				var result = E('span', { 'role': 'status', 'aria-live': 'polite', 'aria-label': _('Connection check result'),
+					'style': 'flex:1;min-width:10em;overflow-wrap:anywhere' }, '');
+				this.checkOutputs[section.id] = result;
+				var previous = this.checkResults[section.id];
+				if (previous) this.setCheckResult(section.id, previous.text, previous.error);
 				this.controls.push(test);
-				fields.push(E('label', {}, _('VLESS connection')), link, warning, test);
+				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('VLESS connection')), link, warning,
+					E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin:.5em 0 1em' }, [ test, result ]));
 				this.linkWarning(link, warning);
 			}
 			if (section.mode !== 'unconfigured')
-				fields.push(E('label', {}, _('Domains (one per line, including subdomains)')), domains,
+				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains,
 					E('p', {}, [ E('label', {}, [ fallback, ' ', _('Use this section for all unmatched traffic') ]) ]));
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
@@ -168,17 +180,40 @@ return baseclass.extend({
 		this.setState(this.externalBusy, this.available);
 	},
 
+	setCheckResult: function(id, text, error) {
+		this.checkResults[id] = { text: text, error: !!error };
+		var output = (this.checkOutputs || {})[id];
+		if (output) {
+			output.textContent = text;
+			output.style.color = error ? '#d93025' : text ? '#22863a' : '';
+		}
+	},
+
+	reset: function() {
+		if (this.externalBusy || this.saving || this.testing || this.resetting || !this.loaded || !L.hasViewPermission()) return Promise.resolve();
+		this.resetting = true;
+		if (this.options.onBusy) this.options.onBusy(true);
+		this.setState(this.externalBusy, this.available);
+		return this.load().then(L.bind(function() { this.result.textContent = ''; }, this))
+			.catch(function() { /* load() displays the read error and retains the edits. */ })
+			.then(L.bind(function() {
+				this.resetting = false;
+				if (this.options.onBusy) this.options.onBusy(false);
+				this.setState(this.externalBusy, this.available);
+			}, this));
+	},
+
 	test: function(section) {
 		if (this.externalBusy || this.saving || this.testing || !L.hasViewPermission()) return Promise.resolve();
-		if (this.dirty) { this.result.textContent = _('Save sections before checking this connection.'); return Promise.resolve(); }
+		if (this.dirty) { this.setCheckResult(section.id, _('Save sections before checking this connection.'), true); return Promise.resolve(); }
 		this.testing = true;
 		if (this.options.onBusy) this.options.onBusy(true);
 		this.setState(this.externalBusy, this.available);
-		this.result.textContent = _('Checking connection…');
+		this.setCheckResult(section.id, _('Checking connection…'), false);
 		return testSection(section.id).then(L.bind(function(result) {
 			if (result.code !== 0) throw new Error(result.message || _('Connection check failed.'));
-			this.result.textContent = _('%s: connection successful. Exit IP: %s').format(section.name, result.ip);
-		}, this)).catch(L.bind(function(error) { this.result.textContent = error.message; }, this)).then(L.bind(function() {
+			this.setCheckResult(section.id, _('Connection successful. Exit IP: %s').format(result.ip), false);
+		}, this)).catch(L.bind(function(error) { this.setCheckResult(section.id, error.message, true); }, this)).then(L.bind(function() {
 			this.testing = false;
 			if (this.options.onBusy) this.options.onBusy(false);
 			this.setState(this.externalBusy, this.available);
@@ -224,8 +259,10 @@ return baseclass.extend({
 		this.cards = E('div', {}, []);
 		this.result = E('p', { 'role': 'status', 'aria-live': 'polite' }, _('Loading sections…'));
 		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(this.add, this) }, _('Add section'));
-		this.saveButton = E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': L.bind(this.save, this) }, _('Save sections and apply'));
-		this.topControls = [ addSection, this.saveButton ];
+		this.saveButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-apply cbi-button-positive',
+			'style': 'background:#218739;border-color:#1c7532;color:#fff', 'click': L.bind(this.save, this) }, _('Save sections and apply'));
+		this.resetButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-reset', 'click': L.bind(this.reset, this) }, _('Reset'));
+		this.topControls = [ addSection, this.saveButton, this.resetButton ];
 		this.controls = this.topControls.slice();
 		this.setState(false, this.available);
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
@@ -233,7 +270,8 @@ return baseclass.extend({
 			E('h3', {}, _('Routing sections')),
 			E('p', {}, _('Sections match domains from top to bottom. The first match wins. One section can handle all unmatched traffic; otherwise it goes directly.')),
 			E('p', {}, _('Rules apply to devices in the routing list below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
-			E('div', {}, [ addSection ]), this.cards, this.saveButton, this.result
+			E('div', {}, [ addSection ]), this.cards,
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
 		]);
 	}
 });

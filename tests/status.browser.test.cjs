@@ -35,11 +35,13 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       const link = 'vless://11111111-2222-4333-8444-555555555555@proxy.example:443?security=tls&sni=example.com&fm=' + 'a'.repeat(1800) + '#Saved%20name';
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
       let macs = [];
+      let checkFailure = false;
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
         if(spec.method==='status') return {available:true,installed:true,running:true};
         if(spec.method==='sections') return {sections:saved};
         if(spec.method==='save_sections') { saved=JSON.parse(mac);return {code:0}; }
+        if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10'};
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
         if(spec.method==='routing') return {macs:macs.slice(),enabled:!!macs.length,active:!!macs.length};
         if(spec.method==='set_routing') { macs=macs.filter(item=>item!==mac); if(enabled)macs.push(mac); return {code:0}; }
@@ -67,7 +69,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(route(0).value==='direct'&&!card(0).querySelector('textarea[aria-label="VLESS link"]'),'type and VLESS field disagree');
           choose(0,'proxy');
           check(route(0).value==='proxy'&&card(0).querySelector('textarea[aria-label="VLESS link"]').value===link,'cannot switch back to Xray');
-          check(editor.topControls.length===2,'there must be one add button and one save button');
+          check(editor.topControls.length===3,'there must be add, save and reset buttons');
           editor.topControls[0].click();
           check(route(1).value==='unconfigured'&&!editor.sections[1].enabled,'new section has a configured route');
           check(card(1).querySelector('input[aria-label="Enable section"]').disabled,'unconfigured section can be enabled');
@@ -87,6 +89,25 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
           check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
           check(saved[2].profile.url===link,'section link was not retained');
+          check(editor.saveButton.parentElement===editor.resetButton.parentElement,'Reset is not next to Save');
+          const green=getComputedStyle(editor.saveButton).backgroundColor;
+          check(green==='rgb(33, 135, 57)','save button is not green');
+          const checkButton=Array.from(card(1).querySelectorAll('button')).find(b=>b.textContent==='Check connection');
+          const output=card(1).querySelector('[aria-label="Connection check result"]');
+          check(checkButton.parentElement===output.parentElement,'connection result is not next to its button');
+          checkFailure=true;
+          checkButton.click();await pause();
+          check(output.textContent==='Proxy connection failed','error is missing from its section');
+          check(getComputedStyle(output).color==='rgb(217, 48, 37)','connection error is not red');
+          check(!editor.result.textContent.includes('Proxy connection failed'),'connection error appeared below all sections');
+          const domainsLabel=Array.from(card(1).querySelectorAll('label')).find(l=>l.textContent.startsWith('Domains'));
+          check(domainsLabel.getBoundingClientRect().y>=checkButton.parentElement.getBoundingClientRect().bottom,'domains label shares the check row');
+          checkFailure=false;
+          checkButton.click();await pause();
+          check(output.textContent.includes('203.0.113.10'),'successful check did not replace the error');
+          editor.add();check(editor.sections.length===4,'draft section was not added');
+          editor.resetButton.click();await pause();
+          check(editor.sections.length===3&&!editor.dirty,'Reset did not restore saved sections');
           check(card(0).querySelector('input[aria-label="Use for unmatched traffic"]').checked===false,'false checkbox attribute enabled the direct default');
           check(card(2).querySelector('input[aria-label="Use for unmatched traffic"]').checked===true,'default checkbox does not match the model');
           document.body.style.width='1000px';

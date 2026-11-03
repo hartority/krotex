@@ -15,7 +15,7 @@ function harness(writable=true){
     L:{bind:(fn,self,...args)=>fn.bind(self,...args),hasViewPermission:()=>writable},
     ui:{addNotification:()=>{}},rpc:{declare:spec=>async(value)=>{
       if(spec.method==='sections')return {sections:state.sections};
-      if(spec.method==='test_section'){state.checks.push(value);return {code:0,ip:'203.0.113.10'};}
+      if(spec.method==='test_section'){state.checks.push(value);return {code:state.testCode||0,ip:'203.0.113.10',message:'Proxy connection failed'};}
       const data=JSON.parse(value);state.saved.push(data);
       if(!state.code)state.sections=data;
       return {code:state.code,message:'Rejected'};
@@ -38,7 +38,7 @@ test('section editor restores the entire link, warnings and textbox height',asyn
   const input=controls(editor,'VLESS link')[0];
   assert.equal(input.value,link);assert.equal(input.style.height,'322px');
   assert.equal(editor.sections[0].url,link);
-  assert.ok(editor.controls.every(c=>!c.disabled||c.krotexBoundary||c===editor.saveButton));
+  assert.ok(editor.controls.every(c=>!c.disabled||c.krotexBoundary||c===editor.saveButton||c===editor.resetButton));
 });
 test('section editor adds, orders and saves exclude/VPN1/VPN2 with one default',async()=>{
   const state=harness(),editor=state.editor;await editor.load();
@@ -64,9 +64,36 @@ test('section editor retains unsaved changes on rejection and blocks invalid lin
 test('section checks target their own saved VPN and cannot test unsaved edits',async()=>{
   const state=harness(),editor=state.editor;await editor.load();
   await editor.test(editor.sections[0]);
-  assert.deepEqual(state.checks,['vpn1']);assert.match(editor.result.textContent,/203.0.113.10/);
+  assert.deepEqual(state.checks,['vpn1']);assert.match(editor.checkOutputs.vpn1.textContent,/203.0.113.10/);
   editor.changed();await editor.test(editor.sections[0]);
-  assert.equal(state.checks.length,1);assert.match(editor.result.textContent,/Save sections/);
+  assert.equal(state.checks.length,1);assert.match(editor.checkOutputs.vpn1.textContent,/Save sections/);
+});
+
+test('connection results stay inside their own section and errors are red',async()=>{
+  const state=harness(),editor=state.editor;
+  state.sections.push({...state.sections[0],id:'vpn2',name:'VPN 2',fallback:false});
+  await editor.load();
+  const globalMessage=editor.result.textContent;
+  await editor.test(editor.sections[0]);
+  const firstResult=editor.checkOutputs.vpn1.textContent;
+  state.testCode=1;
+  await editor.test(editor.sections[1]);
+  assert.equal(editor.checkOutputs.vpn1.textContent,firstResult);
+  assert.equal(editor.checkOutputs.vpn2.textContent,'Proxy connection failed');
+  assert.equal(editor.checkOutputs.vpn2.style.color,'#d93025');
+  assert.equal(editor.result.textContent,globalMessage);
+});
+
+test('Reset discards section edits, additions and deletions without saving',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  editor.sections[0].name='Edited';editor.sections[0].url='invalid';editor.add();editor.remove(0);
+  assert.equal(editor.dirty,true);
+  await editor.reset();
+  assert.equal(editor.sections.length,1);
+  assert.equal(editor.sections[0].id,'vpn1');assert.equal(editor.sections[0].name,'VPN 1');
+  assert.equal(editor.sections[0].url,link);assert.equal(editor.dirty,false);
+  assert.equal(state.saved.length,0);assert.deepEqual(state.busy,[true,false]);
+  assert.equal(editor.resetButton.disabled,true);
 });
 test('disabled default is cleared; removal leaves the remaining section in place',async()=>{
   const {editor}=harness();await editor.load();
