@@ -15,6 +15,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
     const vless = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'));
     const sections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'));
     const connections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/connections.js'));
+    const devicecard = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/devicecard.js'));
     const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace;margin:6px;padding:4px}
       /* LuCI Bootstrap draws its own checkbox using pseudo-elements. */
       input[type=checkbox]::before,input[type=checkbox]::after{position:absolute;content:""}
@@ -38,6 +39,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       const ui = { createHandlerFn:(self,name,arg)=>()=>self[name](arg), addNotification:()=>{} };
       const poll = { add:()=>{} };
       const baseclass = { extend: props => function() { Object.assign(this,props); } };
+      const devicecard = new ((function(){${devicecard}\n})())();
       const vless = new ((function(){${vless}\n})())();
       const link = 'vless://11111111-2222-4333-8444-555555555555@proxy.example:443?security=tls&sni=example.com&fm=' + 'a'.repeat(1800) + '#Saved%20name';
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
@@ -272,6 +274,12 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           const picker=deviceCard.querySelector('[aria-label="Device VPN device"]');
           picker.value=mac1;picker.dispatchEvent(new Event('change'));
           check(editor.deviceCards.textContent.includes('Laptop'),'assigned device has no readable name');
+          const vpnDevice=editor.deviceCards.querySelector('li');
+          check(vpnDevice.querySelector('strong').textContent==='Laptop'&&vpnDevice.textContent.includes('192.168.1.10')&&vpnDevice.querySelector('code').textContent===mac1,'VPN device card lost its name or addresses');
+          const smartCardStyle=getComputedStyle(page.routingList.querySelector('li')),vpnCardStyle=getComputedStyle(vpnDevice);
+          check(vpnCardStyle.backgroundColor===smartCardStyle.backgroundColor&&vpnCardStyle.padding===smartCardStyle.padding&&vpnCardStyle.borderRadius===smartCardStyle.borderRadius,'Smart and Device routing use different device card styles');
+          check(vpnCardStyle.borderLeftWidth===vpnCardStyle.borderRightWidth,'VPN device card has an accented left border');
+
           check(saveCalls===previousSaves,'device VPN was applied before Save');
           page.tabButtons.default.click();await pause();
           check(editor.sections[3].macs[0]===mac1&&editor.dirty,'switching tabs lost the device draft');

@@ -100,6 +100,7 @@ test "$(cat "$TEST_ROOT/usr/share/krotex/version")" = "$expected_version"
 test -f "$TEST_ROOT/etc/krotex/routing.json"
 test -f "$TEST_ROOT/www/luci-static/resources/krotex/vless.js"
 test -f "$TEST_ROOT/www/luci-static/resources/krotex/connections.js"
+test -f "$TEST_ROOT/www/luci-static/resources/krotex/devicecard.js"
 test -f "$TEST_ROOT/www/luci-static/resources/view/krotex/status.js"
 grep -qxF '/etc/krotex/' "$TEST_ROOT/etc/sysupgrade.conf"
 echo 'PASS: first installation deploys files and enables/starts the service'

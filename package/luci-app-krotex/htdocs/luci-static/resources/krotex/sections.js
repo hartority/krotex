@@ -3,6 +3,7 @@
 'require rpc';
 'require ui';
 'require krotex.vless as vless';
+'require krotex.devicecard as devicecard';
 
 var readSections = rpc.declare({ object: 'krotex', method: 'sections', expect: { '': {} } });
 var saveSections = rpc.declare({ object: 'krotex', method: 'save_sections', params: [ 'sections' ], expect: { '': {} } });
@@ -125,11 +126,12 @@ return baseclass.extend({
 		this.controls.push(select, manual, add);
 		var rows = (section.macs || []).map(L.bind(function(mac) {
 			var device = (this.devices || []).filter(function(item) { return item.mac.toLowerCase() === mac; })[0];
-			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'aria-label': _('Remove VPN device %s').format(mac),
-				'click': L.bind(function() { section.macs = section.macs.filter(function(item) { return item !== mac; }); this.changed(); this.renderCards(); }, this) }, '\u00d7');
-			this.controls.push(remove);
-			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:.75em;padding:.6em .8em;margin:.5em 0;border:1px solid #8884;border-radius:4px;overflow-wrap:anywhere' }, [
-				E('span', {}, device ? '%s · %s · %s'.format(device.name === '*' ? _('Unnamed device') : device.name, device.address, mac) : mac), remove ]);
+			var card = devicecard.create({ mac: mac, device: device,
+				removeLabel: _('Remove VPN device %s').format(mac),
+				onRemove: L.bind(function() { section.macs = section.macs.filter(function(item) { return item !== mac; }); this.changed(); this.renderCards(); }, this)
+			});
+			this.controls.push(card.removeButton);
+			return card.element;
 		}, this));
 		return E('div', {}, [
 			E('p', { 'class': 'cbi-value-description' }, _('All external traffic and DNS from these devices use this VPN, independently of Smart routing. Local networks remain direct.')),

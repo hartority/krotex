@@ -21,7 +21,7 @@ function harness(writable=true){
       return {code:state.code,message:'Rejected'};
     }}});
   vm.runInContext("String.prototype.format=function(...a){let i=0;return this.replace(/%s/g,()=>String(a[i++]));};",ctx);
-  for(const name of ['vless','sections']){
+  for(const name of ['vless','devicecard','sections']){
     const source=readFileSync(resolve(__dirname,root+name+'.js'),'utf8');
     const Factory=vm.runInContext('(function(){'+source+'\n})()',ctx);
     ctx[name]=new Factory();

@@ -17,6 +17,7 @@ function harness(writable = true) {
   };
   const context = vm.createContext({
     setTimeout: fn => fn(),
+    baseclass: {extend:props=>function(){Object.assign(this,props);}},
     E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
       replaceChildren(...items) { this.children = items; }, setAttribute(key,value) { this.attrs[key]=value; } }),
     _: text => text,
@@ -72,6 +73,8 @@ function harness(writable = true) {
     return this.replace(/%s|%\\.1f/g, token => token === '%.1f'
       ? Number(args[i++]).toFixed(1) : String(args[i++]));
   };`, context);
+  const Card=vm.runInContext('(function(){'+readFileSync(resolve(__dirname,'../package/luci-app-krotex/htdocs/luci-static/resources/krotex/devicecard.js'),'utf8')+'\n})()',context);
+  context.devicecard=new Card();
   state.view = vm.runInContext(`(function() { ${source}\n })()`, context);
   state.view.render(state.response);
   return state;

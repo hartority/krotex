@@ -5,6 +5,7 @@
 'require ui';
 'require krotex.sections as sections';
 'require krotex.connections as connections';
+'require krotex.devicecard as devicecard';
 
 var callStatus = rpc.declare({
 	object: 'krotex',
@@ -114,21 +115,11 @@ return view.extend({
 		this.routingRemoveButtons = [];
 		var rows = (this.routingMacs || []).map(L.bind(function(mac) {
 			var device = (this.devices || []).filter(function(item) { return item.mac.toLowerCase() === mac; })[0];
-			var name = device && device.name !== '*' ? device.name : _('Unnamed device');
-			var remove = E('button', {
-				'class': 'btn cbi-button-negative', 'type': 'button', 'title': _('Remove device'),
-				'aria-label': _('Remove device %s').format(mac),
-				'click': ui.createHandlerFn(this, 'handleRemoveDevice', mac)
-			}, '×');
-			this.routingRemoveButtons.push(remove);
-			var details = [ E('code', { 'style': 'color:inherit;background:none;padding:0;font-size:.9em;white-space:normal;overflow-wrap:anywhere' }, mac) ];
-			if (device) details.unshift(E('span', { 'style': 'font-size:.9em' }, device.address));
-			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.8em 1em;margin:.6em 0;border:1px solid #409eff66;border-radius:8px;background:rgba(64,158,255,.08);color:inherit' }, [
-				E('div', { 'style': 'min-width:0;flex:1;color:inherit' }, [
-					E('strong', { 'style': 'display:block;color:inherit;font-size:1em;margin-bottom:.3em;overflow-wrap:anywhere' }, name),
-					E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:.2em 1em;color:inherit' }, details)
-				]), remove
-			]);
+			var card = devicecard.create({ mac: mac, device: device,
+				onRemove: ui.createHandlerFn(this, 'handleRemoveDevice', mac)
+			});
+			this.routingRemoveButtons.push(card.removeButton);
+			return card.element;
 		}, this));
 		this.routingList.replaceChildren.apply(this.routingList, rows.length ? rows : [ E('li', { 'style': 'padding:1em;border:1px dashed #8886;border-radius:8px;color:inherit' }, _('No devices added')) ]);
 		this.updateStatus(this.lastStatus);
