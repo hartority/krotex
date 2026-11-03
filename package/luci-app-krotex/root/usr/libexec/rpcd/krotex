@@ -9,7 +9,9 @@ PROG=/usr/bin/xray
 
 status() {
 	local services running=0 pid=0 enabled=0 available=1 memory=0 uptime=0
-	local age idle
+	local age idle version
+	version="$(head -n 1 /usr/share/krotex/version 2>/dev/null)"
+	[ -n "$version" ] || version="$(sed -n 's/^version=//p' /etc/krotex/source-version 2>/dev/null | head -n 1)"
 
 	# Query procd rather than looking for an arbitrary process named xray.
 	services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || available=0
@@ -42,6 +44,7 @@ status() {
 	json_add_boolean running "$running"
 	json_add_boolean enabled "$enabled"
 	json_add_boolean installed "$([ -x "$PROG" ] && echo 1 || echo 0)"
+	json_add_string krotex_version "$version"
 	json_add_string core_version "$("$PROG" version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
 	json_add_int pid "$pid"
 	json_add_int uptime "$uptime"

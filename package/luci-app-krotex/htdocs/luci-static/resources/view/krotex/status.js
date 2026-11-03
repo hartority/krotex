@@ -202,6 +202,7 @@ return view.extend({
 		this.fields.status.style.color = !available ? '' : running ? '#22863a' : '#b42318';
 		this.fields.enabled.textContent = available ? (data.enabled ? _('Enabled') : _('Disabled')) : '—';
 		this.fields.pid.textContent = running ? String(data.pid) : '—';
+		this.fields.krotex_version.textContent = available && data.krotex_version ? data.krotex_version : '\u2014';
 		this.fields.core_version.textContent = available && data.core_version ? data.core_version : '—';
 		this.fields.uptime.textContent = running ? duration : '—';
 		this.fields.memory.textContent = running ? '%.1f MiB'.format((Number(data.memory_kib) || 0) / 1024) : '—';
@@ -230,6 +231,20 @@ return view.extend({
 			this.busy = false;
 			return this.refresh();
 		}, this));
+	},
+
+	showTab: function(name, focus) {
+		if (!this.tabPanels[name]) return;
+		this.activeTab = name;
+		Object.keys(this.tabPanels).forEach(L.bind(function(key) {
+			var selected = key === name;
+			this.tabPanels[key].style.display = selected ? '' : 'none';
+			this.tabButtons[key].setAttribute('aria-selected', String(selected));
+			this.tabButtons[key].tabIndex = selected ? 0 : -1;
+			this.tabItems[key].className = selected ? 'cbi-tab' : 'cbi-tab-disabled';
+		}, this));
+		if (focus) this.tabButtons[name].focus();
+		if (name !== 'overview' && this.sectionsEditor.fitLinks) this.sectionsEditor.fitLinks();
 	},
 
 	render: function(data) {
@@ -282,6 +297,7 @@ return view.extend({
 		]);
 		var rows = [
 			[ 'status', _('Status') ],
+			[ 'krotex_version', _('Krotex version') ],
 			[ 'core_version', _('Xray version') ],
 			[ 'enabled', _('Autostart') ],
 			[ 'pid', _('PID') ],
@@ -297,7 +313,7 @@ return view.extend({
 		}, this));
 		this.statsPanel = E('dl', {
 			'class': 'cbi-section', 'aria-label': _('Service statistics'), 'title': _('Status refreshes every 5 seconds.'),
-			'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(7.5em,1fr));gap:.6em .8em;padding:.75em 1em;margin:.5em 0 .75em;border:1px solid #8884;border-radius:6px'
+			'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5em,1fr));gap:.6em .8em;padding:.75em 1em;margin:.5em 0 .75em;border:1px solid #8884;border-radius:6px'
 		}, rows);
 
 		var actions = [
@@ -319,7 +335,7 @@ return view.extend({
 			'style': 'display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:.5em;max-width:100%'
 		}, actions);
 		this.pageHeader = E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75em 1em;margin-bottom:.75em' }, [
-			E('h2', { 'style': 'margin:0' }, _('Krotex')), this.serviceActions
+			E('h3', { 'style': 'margin:0' }, _('Service overview')), this.serviceActions
 		]);
 
 		this.sectionsEditor = sections.create({
@@ -330,22 +346,48 @@ return view.extend({
 			onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this),
 			onApplied: L.bind(this.refresh, this)
 		});
-		var page = E('div', { 'style': 'padding-bottom:1.5em' }, [
-			this.pageHeader,
-			this.statsPanel,
-			this.sectionsEditor.render(),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('Device routing')),
-				E('label', { 'style': 'display:block;margin-bottom:.5em' }, _('Apply routing sections to')),
-				this.routingMode,
-				this.routingSummary,
-				this.allDevicesNotice,
-				this.deviceSelection,
-				E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
-				E('p', {}, _('Save and apply the changes below. Reconnect devices after applying routing changes. Stopping Krotex restores direct access.'))
+		this.sectionsEditor.render();
+		this.tabPanels = {
+			overview: E('section', { 'id': 'krotex-overview', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-overview' }, [ this.pageHeader, this.statsPanel ]),
+			default: E('section', { 'id': 'krotex-default', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-default' }, [
+				this.sectionsEditor.generalPanel,
+				E('div', { 'class': 'cbi-section' }, [
+					E('h3', {}, _('Devices using default routing')),
+					E('label', { 'style': 'display:block;margin-bottom:.5em' }, _('Apply routing sections to')),
+					this.routingMode, this.routingSummary, this.allDevicesNotice, this.deviceSelection,
+					E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
+					E('p', {}, _('Save and apply the changes below. Reconnect devices after applying routing changes. Stopping Krotex restores direct access.'))
+				])
 			]),
+			devices: E('section', { 'id': 'krotex-devices', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-devices' }, [ this.sectionsEditor.devicePanel ])
+		};
+		this.tabButtons = {};
+		this.tabItems = {};
+		var tabs = [ [ 'overview', _('Overview') ], [ 'default', _('Default routing') ], [ 'devices', _('Device routing') ] ];
+		var tabBar = E('ul', { 'class': 'cbi-tabmenu', 'role': 'tablist', 'aria-label': _('Krotex pages'), 'style': 'display:flex;flex-wrap:wrap' }, tabs.map(L.bind(function(tab, index) {
+			var link = E('a', { 'href': '#krotex-' + tab[0], 'id': 'krotex-tab-' + tab[0], 'role': 'tab', 'aria-controls': 'krotex-' + tab[0],
+				'click': L.bind(function(event) { event.preventDefault(); this.showTab(tab[0]); }, this),
+				'keydown': L.bind(function(event) {
+					var target;
+					if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+					else if (event.key === 'ArrowLeft') target = (index + tabs.length - 1) % tabs.length;
+					else if (event.key === 'Home') target = 0;
+					else if (event.key === 'End') target = tabs.length - 1;
+					else return;
+					event.preventDefault(); this.showTab(tabs[target][0], true);
+				}, this)
+			}, tab[1]);
+			this.tabButtons[tab[0]] = link;
+			var item = E('li', { 'role': 'presentation' }, [ link ]);
+			this.tabItems[tab[0]] = item;
+			return item;
+		}, this)));
+		var page = E('div', { 'style': 'padding-bottom:1.5em' }, [
+			E('h2', {}, _('Krotex')), tabBar,
+			this.tabPanels.overview, this.tabPanels.default, this.tabPanels.devices,
 			E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton, this.sectionsEditor.result ])
 		]);
+		this.showTab('overview');
 		this.updateStatus(data);
 		this.refreshRouting();
 		this.refreshDevices();

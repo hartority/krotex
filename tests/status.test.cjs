@@ -11,14 +11,14 @@ const source = readFileSync(resolve(__dirname,
 function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
-      pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
+      pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21', krotex_version: '0.8.1' },
     notifications: [], actions: [], pollers: [], code: 0,
     routing: { enabled: false, active: false, mode:'selected', macs: [] }, routingCalls: [], routingModeCalls: [], routingCode: 0, settingsCalls: [], draftSections: [], savedSections: []
   };
   const context = vm.createContext({
     setTimeout: fn => fn(),
     E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
-      replaceChildren(...items) { this.children = items; } }),
+      replaceChildren(...items) { this.children = items; }, setAttribute(key,value) { this.attrs[key]=value; } }),
     _: text => text,
     sections: { create: () => ({
       render: () => ({}), setState: () => {}, loaded:true, dirty:false,
@@ -80,6 +80,7 @@ test('shows process metrics and polls every five seconds', () => {
   const { view, pollers } = harness();
   assert.equal(view.fields.status.textContent, 'Running');
   assert.equal(view.fields.core_version.textContent, '26.10.21');
+  assert.equal(view.fields.krotex_version.textContent, '0.8.1');
   assert.equal(view.fields.uptime.textContent, '01:01:01');
   assert.equal(view.fields.memory.textContent, '2.0 MiB');
   assert.equal(view.fields.pid.textContent, '42');

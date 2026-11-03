@@ -152,6 +152,10 @@ return baseclass.extend({
 		this.renderCards();
 	},
 
+	fitLinks: function() {
+		(this.linkInputs || []).forEach(L.bind(this.fitLink, this));
+	},
+
 	fitLink: function(input) {
 		setTimeout(function() {
 			input.style.height = 'auto';
@@ -196,6 +200,7 @@ return baseclass.extend({
 
 	renderCards: function() {
 		this.controls = this.topControls.slice();
+		this.linkInputs = [];
 		this.checkOutputs = Object.create(null);
 		this.refreshFallbackOptions();
 		var linkAppearance = 'box-sizing:border-box;margin:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;font-size:inherit;line-height:1.5;overflow-wrap:anywhere';
@@ -266,6 +271,7 @@ return baseclass.extend({
 						'input': L.bind(function(event) { section.url = event.target.value; this.changed(); this.linkWarning(link, warning); }, this) });
 					link.value = section.url;
 					this.controls.push(link);
+					this.linkInputs.push(link);
 					var linkBox = E('div', { 'style': 'position:relative;margin:.5em 0' }, [ link ]);
 					fields.push(linkBox, warning);
 					if (section.connectionBeforeEdit != null) {
@@ -422,17 +428,20 @@ return baseclass.extend({
 		this.controls = this.topControls.slice();
 		this.setState(false, this.available);
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
-		return E('div', { 'class': 'cbi-section' }, [
+		this.generalPanel = E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Routing sections')),
 			E('p', {}, _('Sections match domains from top to bottom. The first match wins. Choose the route for all remaining traffic below.')),
 			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
-			]), this.cards,
-			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em;margin-top:1.5em' }, [ E('h3', { 'style': 'margin:0' }, _('VPN for devices')), addDeviceVpn ]),
+			]), this.cards
+		]);
+		this.devicePanel = E('div', { 'class': 'cbi-section' }, [
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em;margin-top:1em' }, [ E('h3', { 'style': 'margin:0' }, _('VPN for devices')), addDeviceVpn ]),
 			E('p', {}, _('Each device VPN handles all external traffic from its assigned devices and takes priority over general rules.')),
 			this.deviceCards
-		].concat(this.options.externalActions ? [] : [
+		]);
+		return E('div', {}, [ this.generalPanel, this.devicePanel ].concat(this.options.externalActions ? [] : [
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
 		]));
 	}

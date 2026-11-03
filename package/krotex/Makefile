@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=krotex
-PKG_VERSION:=0.8.0
+PKG_VERSION:=0.8.1
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 
@@ -36,6 +36,7 @@ define Package/krotex/install
 	$(INSTALL_BIN) ./files/firewall.sh $(1)/usr/libexec/krotex/firewall
 	$(INSTALL_DATA) ./files/transparent.json $(1)/usr/share/krotex/transparent.json
 	$(INSTALL_DATA) ./files/sections.uc $(1)/usr/share/krotex/sections.uc
+	printf '%s\n' '$(PKG_VERSION)' > $(1)/usr/share/krotex/version
 	$(INSTALL_BIN) ./files/40-krotex-routing $(1)/etc/uci-defaults/40-krotex-routing
 endef
 

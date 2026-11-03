@@ -201,6 +201,7 @@ usr/libexec/krotex/sections
 usr/libexec/krotex/firewall
 usr/share/krotex/transparent.json
 usr/share/krotex/sections.uc
+usr/share/krotex/version
 etc/uci-defaults/40-krotex-routing
 usr/share/luci/menu.d/luci-app-krotex.json
 usr/share/rpcd/acl.d/luci-app-krotex.json
@@ -266,6 +267,8 @@ fi
 sh "$SYSROOT/etc/uci-defaults/40-krotex-routing"
 rm -f "$SYSROOT/etc/uci-defaults/40-krotex-routing"
 version="$(sed -n 's/^PKG_VERSION:=//p' "$SOURCE/package/krotex/Makefile")"
+printf '%s\n' "$version" > "$SYSROOT/usr/share/krotex/version"
+chmod 0644 "$SYSROOT/usr/share/krotex/version"
 printf '%s\n' "version=$version" "source=$REPOSITORY" "ref=$SOURCE_REF" > "$SYSROOT/etc/krotex/source-version"
 touch "$SYSROOT/etc/sysupgrade.conf"
 grep -qxF '/etc/krotex/' "$SYSROOT/etc/sysupgrade.conf" || printf '\n/etc/krotex/\n' >> "$SYSROOT/etc/sysupgrade.conf"

@@ -223,15 +223,21 @@ cmp "$WORK/saved.json" "$TEST_ROOT/etc/krotex/config.json"
 echo 'PASS: backend rejects invalid field types independently of the browser'
 
 sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
+	-e "s|/usr/share/krotex/version|$TEST_ROOT/usr/share/krotex/version|g" \
+	-e "s|/etc/krotex/source-version|$TEST_ROOT/etc/krotex/source-version|g" \
 	-e "s|/etc/init.d/krotex|$TEST_ROOT/etc/init.d/krotex|g" \
 	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
 	package/luci-app-krotex/root/usr/libexec/rpcd/krotex > "$WORK/rpc"
+mkdir -p "$TEST_ROOT/usr/share/krotex"
+printf '0.8.1\n' > "$TEST_ROOT/usr/share/krotex/version"
 rm "$TEST_ROOT/running"
 "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
 	"$RUNTIME/bin/busybox" ash "$WORK/rpc" call status > "$WORK/result"
 json_load "$(cat "$WORK/result")"
 json_get_var active running
 test "$active" = 0
+json_get_var krotex_version krotex_version
+test "$krotex_version" = 0.8.1
 ! grep -q WARNING "$WORK/result"
 echo 'PASS: stopped-service RPC status stays valid JSON on OpenWrt 24.10 jshn'
 

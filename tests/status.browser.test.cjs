@@ -45,7 +45,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       let checkFailure = false,saveFailure=false,saveCalls=0;
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
-        if(spec.method==='status') return {available:true,installed:true,running:true};
+        if(spec.method==='status') return {available:true,installed:true,running:true,krotex_version:'0.8.1'};
         if(spec.method==='sections') return {sections:saved};
         if(spec.method==='save_settings') {
           saveCalls++;
@@ -68,6 +68,10 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         try {
           document.body.append(page.render(await page.load()));
           await pause();
+          check(page.activeTab==='overview'&&getComputedStyle(page.tabPanels.default).display==='none'&&getComputedStyle(page.tabPanels.devices).display==='none','Overview is not the initial tab');
+          check(page.fields.krotex_version.textContent==='0.8.1','installed Krotex version is missing');
+          page.tabButtons.default.click();await pause();
+          check(page.activeTab==='default'&&getComputedStyle(page.tabPanels.overview).display==='none','Default routing did not open');
           check(!document.body.textContent.includes('nullnull'),'null children are rendered below the sections');
           const endpoint=document.querySelector('[aria-label="Configured VLESS server"]');
           const change=document.querySelector('button[aria-label="Change VLESS connection"]');
@@ -177,19 +181,20 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(!editor.cards.querySelector('input[aria-label="Use for unmatched traffic"]'),'per-section default checkbox remains');
           check(editor.fallbackSelect.value===saved[2].id,'saved default VPN is not selected in the shared list');
           check(editor.fallbackSelect.parentElement.parentElement===editor.topControls[0].parentElement,'default selector is not beside Add section');
+          page.tabButtons.overview.click();await pause();
           document.body.style.width='1000px';
-          const addBounds=editor.topControls[0].getBoundingClientRect();
-          check(Math.abs(addBounds.right-editor.topControls[0].parentElement.getBoundingClientRect().right)<2,'Add section is not at the right edge');
-          const heading=page.pageHeader.querySelector('h2').getBoundingClientRect();
+
+          const heading=page.pageHeader.querySelector('h3').getBoundingClientRect();
           const actions=page.serviceActions.getBoundingClientRect();
           check(actions.left>heading.right&&Math.abs(actions.y-heading.y)<30,'service controls are not beside the heading');
           check(page.pageHeader.getBoundingClientRect().bottom<=page.statsPanel.getBoundingClientRect().top,'service controls remain under the statistics');
           check(page.statsPanel.getBoundingClientRect().height<100,'desktop statistics are too tall');
-          check(page.statsPanel.querySelectorAll('dt').length===7,'statistics lost a metric');
+          check(page.statsPanel.querySelectorAll('dt').length===8,'statistics lost a metric');
           document.body.style.width='320px';
           check(page.statsPanel.scrollWidth<=page.statsPanel.clientWidth+2,'statistics overflow on mobile');
           check(page.statsPanel.getBoundingClientRect().height<240,'mobile statistics are too tall');
           check(page.pageHeader.scrollWidth<=page.pageHeader.clientWidth+2,'service controls overflow on mobile');
+          page.tabButtons.default.click();await pause();
           page.deviceSelect.value=mac1;
           page.deviceSelect.dispatchEvent(new Event('change'));
           await pause();
@@ -238,6 +243,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(page.routingMacs.length===2&&!page.routingDirty&&editor.sections[0].name==='Draft exclude'&&!editor.dirty,'Reset did not restore both sections and devices');
 
           const previousSaves=saveCalls;
+          page.tabButtons.devices.click();await pause();
           editor.topControls[4].click();await pause();
           let deviceCard=editor.deviceCards.children[0];
           check(!deviceCard.querySelector('[aria-label="Section route"]')&&!deviceCard.querySelector('[aria-label="Domains"]'),'device VPN contains general routing controls');
@@ -248,6 +254,9 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           picker.value=mac1;picker.dispatchEvent(new Event('change'));
           check(editor.deviceCards.textContent.includes('Laptop'),'assigned device has no readable name');
           check(saveCalls===previousSaves,'device VPN was applied before Save');
+          page.tabButtons.default.click();await pause();
+          check(editor.sections[3].macs[0]===mac1&&editor.dirty,'switching tabs lost the device draft');
+          page.tabButtons.devices.click();await pause();
           check(editor.cards.children.length===3&&editor.deviceCards.children.length===1,'device VPN was mixed with general rules');
           check(!Array.from(editor.fallbackSelect.options).some(option=>option.value===editor.sections[3].id),'device VPN can be selected as a general fallback');
           editor.saveButton.click();await pause();
@@ -260,6 +269,14 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(editor.result.textContent.includes('already belongs'),'duplicate device assignment was not rejected');
           editor.resetButton.click();await pause();
           check(editor.deviceCards.children.length===1&&!editor.dirty,'Reset did not discard the extra device VPN');
+          editor.deviceCards.children[0].querySelector('[aria-label="Change VLESS connection"]').click();await pause();
+          page.tabButtons.default.click();await pause();
+          await page.refreshDevices();await pause();
+          page.tabButtons.devices.click();await pause();
+          const reopenedLink=editor.deviceCards.querySelector('[aria-label="VLESS link"]');
+          check(reopenedLink.value===link&&reopenedLink.scrollHeight<=reopenedLink.clientHeight+2,'opening a hidden tab clips the full VLESS link');
+          page.tabButtons.devices.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));await pause();
+          check(page.activeTab==='overview'&&document.activeElement===page.tabButtons.overview,'keyboard tab navigation failed');
           document.body.dataset.testResult='pass';
         } catch(error) { document.body.dataset.testResult='fail'; document.body.append(error.stack); }
       });
