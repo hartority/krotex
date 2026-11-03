@@ -1,6 +1,7 @@
 #!/bin/sh
 
 . /usr/share/libubox/jshn.sh
+_json_no_warning=1
 
 INIT=/etc/init.d/krotex
 
@@ -54,6 +55,13 @@ action() {
 		start|stop|restart|enable|disable) ;;
 		*) return 2 ;;
 	esac
+	mkdir /var/lock/krotex-setup.lock 2>/dev/null || {
+		json_init
+		json_add_int code 1
+		json_dump
+		return
+	}
+	trap 'rmdir /var/lock/krotex-setup.lock' EXIT
 
 	# Never return command output as JSON or accept arbitrary init names.
 	"$INIT" "$action" >/dev/null 2>&1
@@ -64,11 +72,12 @@ action() {
 }
 
 case "$1" in
-	list) echo '{"status":{},"action":{"action":"str"}}' ;;
+	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{}}' ;;
 	call)
 		case "$2" in
 			status) status ;;
 			action) action ;;
+			connection|save_connection|test_connection) exec /usr/libexec/krotex/connection "$2" ;;
 			*) exit 2 ;;
 		esac
 		;;

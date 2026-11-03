@@ -1,0 +1,228 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+_json_no_warning=1
+
+CONFIG=/etc/krotex/config.json
+INIT=/etc/init.d/krotex
+LOCK=/var/lock/krotex-setup.lock
+WORK=
+PREVIOUS=
+CHANGED=0
+LOCKED=0
+WAS_RUNNING=0
+METHOD=$1
+
+reply() {
+	json_init
+	json_add_int code "$1"
+	json_add_string message "$2"
+	json_dump
+}
+
+fail() { reply 1 "$1"; exit 0; }
+
+acquire_lock() {
+	mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
+	LOCKED=1
+}
+
+cleanup() {
+	if [ "$CHANGED" -eq 1 ]; then
+		"$INIT" stop >/dev/null 2>&1
+		if mv -f "$PREVIOUS" "$CONFIG"; then
+			[ "$WAS_RUNNING" -eq 0 ] || "$INIT" start >/dev/null 2>&1
+		else
+			# Keep the recovery copy when restoration fails.
+			PREVIOUS=
+		fi
+	fi
+	[ -z "$PREVIOUS" ] || rm -f "$PREVIOUS"
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	[ "$LOCKED" -eq 0 ] || rmdir "$LOCK"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+running() {
+	local data active
+	data="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || return 2
+	json_load "$data" || return 2
+	json_select krotex && json_select instances && json_select main || return 1
+	json_get_var active running
+	[ "$active" = 1 ]
+}
+
+summary() {
+	local address port security configured=0
+	if json_load "$(cat "$CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1; then
+		local protocol tag
+		json_get_var protocol protocol
+		json_get_var tag tag
+		if [ "$protocol" = vless ] && [ "$tag" = proxy ]; then
+			json_select streamSettings && json_get_var security security
+			json_select ..
+			if json_select settings && json_select vnext && json_select 1; then
+				json_get_var address address
+				json_get_var port port
+				configured=1
+			fi
+		fi
+	fi
+	json_init
+	json_add_boolean configured "$configured"
+	json_add_string address "$address"
+	json_add_int port "${port:-0}"
+	json_add_string security "$security"
+	json_dump
+}
+
+read_profile() {
+	local request profile field kind
+	IFS= read -r request
+	[ "${#request}" -le 16384 ] || fail 'Connection settings are too large.'
+	json_load "$request" || fail 'Invalid request.'
+	json_get_var profile profile
+	[ -n "$profile" ] && json_load "$profile" || fail 'Invalid connection settings.'
+	# Rebuild the configuration from scalar fields, never accept a raw Xray config.
+	for field in id address security server_name fingerprint public_key short_id spider_x flow alpn; do
+		json_get_type kind "$field"
+		[ "$kind" = string ] || fail 'Invalid connection field type.'
+		json_get_var "$field" "$field"
+	done
+	json_get_type kind port
+	[ "$kind" = int ] || fail 'Invalid server port.'
+	json_get_var port port
+	[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail 'Invalid server port.'
+	printf '%s\n' "$id" | grep -Eq '^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$' || fail 'Invalid UUID.'
+	case "$address" in ''|*[!a-zA-Z0-9:._-]*) fail 'Invalid server address.' ;; esac
+	case "$security" in tls|reality) ;; *) fail 'TLS or REALITY is required.' ;; esac
+	case "$server_name" in *[!a-zA-Z0-9._-]*) fail 'Invalid server name.' ;; esac
+	case "$flow" in ''|xtls-rprx-vision) ;; *) fail 'Unsupported VLESS flow.' ;; esac
+	case "$fingerprint" in chrome|firefox|safari|ios|android|edge|360|qq|random|randomized) ;; *) fail 'Unsupported TLS fingerprint.' ;; esac
+	if [ "$security" = reality ]; then
+		[ -n "$server_name" ] || fail 'REALITY requires a server name.'
+		printf '%s\n' "$public_key" | grep -Eq '^[A-Za-z0-9_-]{43}$' || fail 'Invalid REALITY public key.'
+		printf '%s\n' "$short_id" | grep -Eq '^([[:xdigit:]]{2}){0,8}$' || fail 'Invalid REALITY short ID.'
+		[ -z "$alpn" ] || fail 'Custom ALPN is supported only for TLS.'
+	fi
+	case "$alpn" in *[!a-zA-Z0-9/.,_-]*|,*|*,|*,,*) fail 'Invalid ALPN.' ;; esac
+}
+
+generate() {
+	json_init
+	json_add_object log
+	json_add_string loglevel warning
+	json_close_object
+	json_add_array inbounds
+	json_add_object ''
+	json_add_string tag local-socks
+	json_add_string listen 127.0.0.1
+	json_add_int port 10808
+	json_add_string protocol socks
+	json_add_object settings
+	json_add_string auth noauth
+	json_add_boolean udp 0
+	json_close_object
+	json_close_object
+	json_close_array
+	json_add_array outbounds
+	json_add_object ''
+	json_add_string tag proxy
+	json_add_string protocol vless
+	json_add_object settings
+	json_add_array vnext
+	json_add_object ''
+	json_add_string address "$address"
+	json_add_int port "$port"
+	json_add_array users
+	json_add_object ''
+	json_add_string id "$id"
+	json_add_string encryption none
+	[ -z "$flow" ] || json_add_string flow "$flow"
+	json_close_object
+	json_close_array
+	json_close_object
+	json_close_array
+	json_close_object
+	json_add_object streamSettings
+	json_add_string network tcp
+	json_add_string security "$security"
+	if [ "$security" = reality ]; then
+		json_add_object realitySettings
+		json_add_string publicKey "$public_key"
+		json_add_string shortId "$short_id"
+		json_add_string spiderX "$spider_x"
+	else
+		json_add_object tlsSettings
+		if [ -n "$alpn" ]; then
+			local entry old_ifs=$IFS
+			json_add_array alpn
+			IFS=,
+			for entry in $alpn; do json_add_string '' "$entry"; done
+			IFS=$old_ifs
+			json_close_array
+		fi
+	fi
+	[ -z "$server_name" ] || json_add_string serverName "$server_name"
+	json_add_string fingerprint "$fingerprint"
+	json_close_object
+	json_close_object
+	json_close_object
+	json_add_object ''
+	json_add_string tag direct
+	json_add_string protocol freedom
+	json_close_object
+	json_close_array
+	json_dump
+}
+
+save() {
+	read_profile
+	acquire_lock
+	umask 077
+	WORK="$(mktemp -d /etc/krotex/.apply.XXXXXX)" || fail 'Unable to create temporary files.'
+	generate > "$WORK/config.json" || fail 'Unable to generate Xray configuration.'
+	/usr/bin/xray run -test -config "$WORK/config.json" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
+	if running; then WAS_RUNNING=1; else
+		[ "$?" -eq 1 ] || fail 'Unable to query procd.'
+	fi
+	PREVIOUS="$(mktemp /etc/krotex/.previous.XXXXXX)" || fail 'Unable to create a recovery file.'
+	cp "$CONFIG" "$PREVIOUS" || fail 'Unable to back up the configuration.'
+	mv "$WORK/config.json" "$CONFIG" || fail 'Unable to save the configuration.'
+	CHANGED=1
+	"$INIT" restart > "$WORK/start.log" 2>&1 || fail 'Xray failed to start; restoring the previous configuration.'
+	local ready=0 attempt
+	for attempt in 1 2 3 4 5; do
+		sleep 1
+		if running; then ready=1; break; fi
+	done
+	[ "$ready" -eq 1 ] || fail 'Xray did not start; restoring the previous configuration.'
+	CHANGED=0
+	reply 0 'Connection saved and applied.'
+}
+
+test_connection() {
+	acquire_lock
+	# Refuse to label the initial direct-only SOCKS listener as a working proxy.
+	local protocol tag result
+	json_load "$(cat "$CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
+	json_get_var protocol protocol
+	json_get_var tag tag
+	[ "$protocol" = vless ] && [ "$tag" = proxy ] || fail 'Configure a VLESS connection first.'
+	running || fail 'Start Krotex before checking the connection.'
+	result="$(curl --silent --fail --noproxy '' --proxy socks5h://127.0.0.1:10808 \
+		--connect-timeout 5 --max-time 12 --proto '=https' https://api.ipify.org 2>/dev/null)" || fail 'The HTTPS request through the proxy failed.'
+	case "$result" in ''|*[!0-9a-fA-F:.]*) fail 'The IP check returned an unexpected response.' ;; esac
+	json_init
+	json_add_int code 0
+	json_add_string ip "$result"
+	json_dump
+}
+
+case "$METHOD" in
+	connection) summary ;;
+	save_connection) save ;;
+	test_connection) test_connection ;;
+	*) exit 2 ;;
+esac

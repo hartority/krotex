@@ -122,6 +122,8 @@ CORE="$SOURCE/package/krotex/files"
 LUCI="$SOURCE/package/luci-app-krotex"
 for path in "$CORE/krotex.init" "$CORE/config.json" \
 	"$LUCI/htdocs/luci-static/resources/view/krotex/status.js" \
+	"$LUCI/htdocs/luci-static/resources/krotex/vless.js" \
+	"$LUCI/root/usr/libexec/krotex/connection" \
 	"$LUCI/root/usr/libexec/rpcd/krotex" \
 	"$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" \
 	"$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json"; do
@@ -147,10 +149,10 @@ fi
 log 'Installing runtime dependencies...'
 if [ "$MANAGER" = opkg ]; then
 	opkg update
-	opkg install ca-bundle xray-core luci-base rpcd jshn ubus
+	opkg install ca-bundle xray-core luci-base rpcd jshn ubus curl
 else
 	apk update
-	apk add ca-bundle xray-core luci-base rpcd jshn ubus
+	apk add ca-bundle xray-core luci-base rpcd jshn ubus curl
 fi
 . "$SYSROOT/usr/share/libubox/jshn.sh"
 [ -x "$SYSROOT/etc/init.d/rpcd" ] || die 'rpcd init script is missing.'
@@ -173,9 +175,11 @@ CONFIG="$SYSROOT/etc/krotex/config.json"
 cat > "$WORK/managed" <<'EOF'
 etc/init.d/krotex
 usr/libexec/rpcd/krotex
+usr/libexec/krotex/connection
 usr/share/luci/menu.d/luci-app-krotex.json
 usr/share/rpcd/acl.d/luci-app-krotex.json
 www/luci-static/resources/view/krotex/status.js
+www/luci-static/resources/krotex/vless.js
 etc/krotex/config.json
 etc/krotex/source-version
 etc/sysupgrade.conf
@@ -203,9 +207,11 @@ copy_file() {
 }
 copy_file "$CORE/krotex.init" "$SYSROOT/etc/init.d/krotex" 0755
 copy_file "$LUCI/root/usr/libexec/rpcd/krotex" "$SYSROOT/usr/libexec/rpcd/krotex" 0755
+copy_file "$LUCI/root/usr/libexec/krotex/connection" "$SYSROOT/usr/libexec/krotex/connection" 0755
 copy_file "$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" "$SYSROOT/usr/share/luci/menu.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json" "$SYSROOT/usr/share/rpcd/acl.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/view/krotex/status.js" "$SYSROOT/www/luci-static/resources/view/krotex/status.js" 0644
+copy_file "$LUCI/htdocs/luci-static/resources/krotex/vless.js" "$SYSROOT/www/luci-static/resources/krotex/vless.js" 0644
 if [ ! -f "$SYSROOT/etc/krotex/config.json" ]; then
 	copy_file "$CORE/config.json" "$SYSROOT/etc/krotex/config.json" 0600
 fi

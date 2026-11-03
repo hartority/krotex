@@ -12,11 +12,15 @@ function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048 },
-    notifications: [], actions: [], pollers: [], code: 0
+    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0
   };
   const context = vm.createContext({
     E: (tag, attrs, children) => ({ tag, attrs, children, style: {}, textContent: '' }),
     _: text => text,
+    vless: { parse: value => {
+      if (value !== 'vless://valid') throw new Error('Invalid link');
+      return { id: 'test-uuid', address: 'proxy.example' };
+    } },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
     rpc: { declare: spec => async action => {
@@ -24,6 +28,12 @@ function harness(writable = true) {
         if (state.offline) throw new Error('RPC offline');
         return state.response;
       }
+      if (spec.method === 'connection') return { configured: false };
+      if (spec.method === 'save_connection') {
+        state.saved.push(JSON.parse(action));
+        return { code: state.connectionCode, message: 'Rejected' };
+      }
+      if (spec.method === 'test_connection') return { code: 0, ip: '203.0.113.2' };
       state.actions.push(action);
       return { code: state.code };
     } },
@@ -98,4 +108,32 @@ test('failed service command notifies the user and releases controls', async () 
   assert.equal(state.notifications.length, 1);
   assert.equal(state.view.busy, false);
   assert.ok(state.view.buttons.every(button => !button.disabled));
+});
+
+test('applying a link sends a profile and clears the credential input', async () => {
+  const state = harness();
+  state.view.connectionInput.value = 'vless://valid';
+  await state.view.handleConnection('save');
+  assert.deepEqual(state.saved, [{ id: 'test-uuid', address: 'proxy.example' }]);
+  assert.equal(state.view.connectionInput.value, '');
+  assert.equal(state.view.connectionResult.textContent, 'Connection saved and applied.');
+  assert.equal(state.view.busy, false);
+});
+
+test('invalid link is rejected before RPC and failed saves keep the input', async () => {
+  const state = harness();
+  state.view.connectionInput.value = 'not a link';
+  await state.view.handleConnection('save');
+  assert.equal(state.saved.length, 0);
+  state.view.connectionInput.value = 'vless://valid';
+  state.connectionCode = 1;
+  await state.view.handleConnection('save');
+  assert.equal(state.view.connectionInput.value, 'vless://valid');
+  assert.equal(state.view.connectionResult.textContent, 'Rejected');
+});
+
+test('connection check displays the exit IP', async () => {
+  const state = harness();
+  await state.view.handleConnection('test');
+  assert.equal(state.view.connectionResult.textContent, 'Connection successful. Exit IP: 203.0.113.2');
 });

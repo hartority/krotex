@@ -78,6 +78,8 @@ sh "$WORK/source/install.sh" > "$WORK/install.log" 2>&1 || { cat "$WORK/install.
 test -f "$TEST_ROOT/running"
 test -f "$TEST_ROOT/enabled"
 test -x "$TEST_ROOT/usr/libexec/rpcd/krotex"
+test -x "$TEST_ROOT/usr/libexec/krotex/connection"
+test -f "$TEST_ROOT/www/luci-static/resources/krotex/vless.js"
 test -f "$TEST_ROOT/www/luci-static/resources/view/krotex/status.js"
 grep -qxF '/etc/krotex/' "$TEST_ROOT/etc/sysupgrade.conf"
 echo 'PASS: first installation deploys files and enables/starts the service'
@@ -117,17 +119,25 @@ echo 'PASS: deployment failure restores previous files and service state'
 # Exercise GitHub archive bootstrap without making network requests.
 tar -czf "$WORK/source.tar.gz" -C "$WORK" source
 TEST_ARCHIVE="$WORK/source.tar.gz"
-export TEST_ARCHIVE
+TEST_INSTALLER="$WORK/source/install.sh"
+export TEST_ARCHIVE TEST_INSTALLER
 cat > "$WORK/bin/curl" <<'EOF'
 #!/bin/sh
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) shift; destination=$1 ;;
-    https://*) printf '%s\n' "$1" > "$TEST_ROOT/download-url" ;;
+    https://*) url=$1 ;;
   esac
   shift
 done
-cp "$TEST_ARCHIVE" "$destination"
+case "$url" in
+  https://raw.githubusercontent.com/*)
+    printf '%s\n' "$url" > "$TEST_ROOT/installer-url"
+    cp "$TEST_INSTALLER" "$destination" ;;
+  *)
+    printf '%s\n' "$url" > "$TEST_ROOT/download-url"
+    cp "$TEST_ARCHIVE" "$destination" ;;
+esac
 EOF
 chmod 0755 "$WORK/bin/curl"
 sh "$WORK/source/update.sh" --ref v0.1.0 > "$WORK/download.log" 2>&1 || { cat "$WORK/download.log"; exit 1; }
@@ -135,6 +145,13 @@ grep -qxF 'https://codeload.github.com/hartority/krotex/tar.gz/v0.1.0' "$TEST_RO
 grep -qxF 'ref=v0.1.0' "$TEST_ROOT/etc/krotex/source-version"
 test -f "$TEST_ROOT/running"
 echo 'PASS: GitHub archive bootstrap supports an explicit ref'
+
+mkdir "$WORK/bootstrap"
+cp update.sh "$WORK/bootstrap/update.sh"
+sh "$WORK/bootstrap/update.sh" --ref v0.2.0 > "$WORK/bootstrap.log" 2>&1 || { cat "$WORK/bootstrap.log"; exit 1; }
+grep -qxF 'https://raw.githubusercontent.com/hartority/krotex/v0.2.0/install.sh' "$TEST_ROOT/installer-url"
+grep -qxF 'https://codeload.github.com/hartority/krotex/tar.gz/v0.2.0' "$TEST_ROOT/download-url"
+echo 'PASS: standalone updater pins both installer and source to the requested ref'
 
 rm "$WORK/bin/opkg"
 cat > "$WORK/bin/apk" <<'EOF'
