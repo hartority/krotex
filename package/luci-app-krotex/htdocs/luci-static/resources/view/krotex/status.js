@@ -329,7 +329,7 @@ return view.extend({
 			onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this),
 			onApplied: L.bind(this.refresh, this)
 		});
-		var page = E('div', {}, [
+		var page = E('div', { 'style': 'padding-bottom:1.5em' }, [
 			this.pageHeader,
 			this.statsPanel,
 			this.sectionsEditor.render(),
