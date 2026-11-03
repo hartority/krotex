@@ -148,10 +148,16 @@ return baseclass.extend({
 				E('option', { 'value': 'direct' }, _('Direct')), E('option', { 'value': 'proxy' }, _('Xray')) ]);
 			// LuCI sets attributes verbatim: selected="false" is still selected.
 			mode.value = section.mode;
-			var enabled = E('input', { 'type': 'checkbox', 'aria-label': _('Enable section'),
+			var enabled = E('input', { 'type': 'checkbox', 'role': 'switch', 'aria-label': _('Enable section'),
+				'style': 'appearance:none;-webkit-appearance:none;display:block;width:2em;height:1.15em;margin:0;border:1px solid #8886;border-radius:1em;cursor:pointer;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)'),
 				'change': L.bind(function(event) { section.enabled = event.target.checked; if (!section.enabled) section.fallback = false; this.changed(); this.renderCards(); }, this) });
 			enabled.checked = !!section.enabled;
 			enabled.krotexBoundary = section.mode === 'unconfigured';
+			var enabledSwitch = E('label', { 'title': section.enabled ? _('Enabled') : _('Disabled'),
+				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;margin:0'
+			}, [ enabled, E('span', { 'aria-hidden': 'true',
+				'style': 'position:absolute;pointer-events:none;top:50%;transform:translateY(-50%);left:' + (section.enabled ? 'calc(100% - .9em)' : '.15em') + ';width:.75em;height:.75em;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004'
+			}) ]);
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
@@ -166,8 +172,8 @@ return baseclass.extend({
 			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'style': 'flex:0 0 auto', 'aria-label': _('Remove section'),
 				'click': L.bind(function() { this.remove(index); }, this) }, '×');
 			this.controls.push(name, mode, enabled, domains, remove);
-			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name ].concat(buttons, [remove])),
-				E('p', {}, [ mode, ' ', E('label', {}, [ enabled, ' ', _('Enabled') ]) ]) ];
+			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name, enabledSwitch ].concat(buttons, [remove])),
+				E('p', {}, mode) ];
 			if (section.mode === 'proxy') {
 				var endpoint;
 				try {

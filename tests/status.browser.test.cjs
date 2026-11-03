@@ -91,8 +91,17 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(!editor.cards.querySelector('strong'),'duplicate section heading remains');
           const nameInput=card(2).querySelector('input[aria-label="Section name"]');
           const remove=card(2).querySelector('button[aria-label="Remove section"]');
+          const enabled=card(2).querySelector('input[aria-label="Enable section"]');
           check(nameInput.parentElement===remove.parentElement,'name and action buttons are on different rows');
+          check(enabled.parentElement.parentElement===nameInput.parentElement,'Enabled is not in the section header');
+          check(enabled.getAttribute('role')==='switch','Enabled is not a switch');
+          const up=card(2).querySelector('button[aria-label="Move section up"]');
+          check(nameInput.getBoundingClientRect().right<=enabled.getBoundingClientRect().left&&enabled.getBoundingClientRect().right<=up.getBoundingClientRect().left,'Enabled is not between the name and arrows');
           check(Math.abs(nameInput.getBoundingClientRect().y-remove.getBoundingClientRect().y)<12,'name and buttons do not line up');
+          enabled.click();
+          check(!editor.sections[2].enabled&&!card(2).querySelector('[role="switch"]').checked,'switch does not disable the section');
+          card(2).querySelector('[role="switch"]').click();
+          check(editor.sections[2].enabled,'switch does not re-enable the section');
           editor.fallbackSelect.value=editor.sections[2].id;editor.fallbackSelect.dispatchEvent(new Event('change'));
           await editor.save();
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
