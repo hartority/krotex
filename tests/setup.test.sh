@@ -29,6 +29,11 @@ cat > "$WORK/bin/ubus" <<'EOF'
 #!/bin/sh
 echo '{}'
 EOF
+cat > "$WORK/bin/uci" <<'EOF'
+#!/bin/sh
+mkdir -p "$TEST_ROOT/etc/config"
+cat > "$TEST_ROOT/etc/config/firewall"
+EOF
 cat > "$WORK/bin/sleep" <<'EOF'
 #!/bin/sh
 exit 0
@@ -85,6 +90,10 @@ test -f "$TEST_ROOT/running"
 test -f "$TEST_ROOT/enabled"
 test -x "$TEST_ROOT/usr/libexec/rpcd/krotex"
 test -x "$TEST_ROOT/usr/libexec/krotex/connection"
+test -x "$TEST_ROOT/usr/libexec/krotex/routing"
+test -x "$TEST_ROOT/usr/libexec/krotex/firewall"
+test -f "$TEST_ROOT/usr/share/krotex/transparent.json"
+test -f "$TEST_ROOT/etc/krotex/routing.json"
 test -f "$TEST_ROOT/www/luci-static/resources/krotex/vless.js"
 test -f "$TEST_ROOT/www/luci-static/resources/view/krotex/status.js"
 grep -qxF '/etc/krotex/' "$TEST_ROOT/etc/sysupgrade.conf"

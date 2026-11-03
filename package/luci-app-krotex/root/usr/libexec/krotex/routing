@@ -1,0 +1,117 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+_json_no_warning=1
+CONFIG=/etc/krotex/routing.json
+CORE_CONFIG=/etc/krotex/config.json
+FIREWALL=/usr/libexec/krotex/firewall
+LOCK=/var/lock/krotex-setup.lock
+LOCKED=0
+WORK=
+CHANGED=0
+
+cleanup() {
+	if [ "$CHANGED" -eq 1 ] && [ -f "$WORK/previous.json" ]; then
+		if mv "$WORK/previous.json" "$CONFIG"; then
+			"$FIREWALL" apply >/dev/null 2>&1
+		else
+			printf '[Krotex] Routing recovery retained at %s\n' "$WORK/previous.json" >&2
+			WORK=
+		fi
+	fi
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	[ "$LOCKED" -eq 0 ] || rmdir "$LOCK"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+reply() {
+	json_init
+	json_add_int code "$1"
+	json_add_string message "$2"
+	json_dump
+}
+fail() { reply 1 "$1"; exit 0; }
+valid_mac() {
+	printf '%s\n' "$1" | grep -Eq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$' || return 1
+	[ "$1" != 00:00:00:00:00:00 ] && [ "$((0x${1%%:*} & 1))" -eq 0 ]
+}
+
+devices() {
+	local expires mac address hostname client_id
+	json_init
+	json_add_array devices
+	if [ -r /tmp/dhcp.leases ]; then
+		while read -r expires mac address hostname client_id; do
+			valid_mac "$mac" || continue
+			json_add_object ''
+			json_add_string mac "$mac"
+			json_add_string address "$address"
+			json_add_string name "$hostname"
+			json_close_object
+		done < /tmp/dhcp.leases
+	fi
+	json_close_array
+	json_dump
+}
+
+status() {
+	local enabled=0 mac='' active=0
+	if json_load "$(cat "$CONFIG" 2>/dev/null)"; then
+		json_get_var enabled enabled
+		json_get_var mac mac
+	fi
+	"$FIREWALL" status && active=1
+	json_init
+	json_add_boolean enabled "${enabled:-0}"
+	json_add_string mac "$mac"
+	json_add_boolean active "$active"
+	json_dump
+}
+
+save() {
+	local request mac enabled kind protocol tag detail
+	IFS= read -r request
+	[ "${#request}" -le 1024 ] && json_load "$request" || fail 'Invalid routing request.'
+	json_get_type kind enabled
+	[ "$kind" = boolean ] || fail 'Invalid routing state.'
+	json_get_var enabled enabled
+	json_get_type kind mac
+	[ "$kind" = string ] || fail 'Invalid MAC address.'
+	json_get_var mac mac
+	mac="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
+	if [ "$enabled" = 1 ] || [ -n "$mac" ]; then
+		valid_mac "$mac" || fail 'Enter a valid unicast device MAC address.'
+	fi
+	mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
+	LOCKED=1
+	if [ "$enabled" = 1 ]; then
+		json_load "$(cat "$CORE_CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
+		json_get_var protocol protocol
+		json_get_var tag tag
+		[ "$protocol" = vless ] && [ "$tag" = proxy ] || fail 'Configure a VLESS connection first.'
+		[ -f /var/run/krotex/routing-service-active ] || fail 'Start Krotex before enabling device routing.'
+	fi
+	umask 077
+	WORK="$(mktemp -d /etc/krotex/.routing.XXXXXX)" || fail 'Unable to create temporary files.'
+	cp "$CONFIG" "$WORK/previous.json" || fail 'Unable to back up routing settings.'
+	json_init
+	json_add_boolean enabled "$enabled"
+	json_add_string mac "$mac"
+	json_dump > "$WORK/new.json" || fail 'Unable to generate routing settings.'
+	mv "$WORK/new.json" "$CONFIG" || fail 'Unable to save routing settings.'
+	CHANGED=1
+	if ! "$FIREWALL" apply > "$WORK/error" 2>&1; then
+		detail="$(head -c 512 "$WORK/error")"
+		fail "Unable to apply device routing. $detail"
+	fi
+	CHANGED=0
+	reply 0 'Device routing settings applied.'
+}
+
+case "$1" in
+	devices) devices ;;
+	routing) status ;;
+	set_routing) save ;;
+	*) exit 2 ;;
+esac

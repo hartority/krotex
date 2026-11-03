@@ -103,7 +103,9 @@ NEW="$(mktemp "$SYSROOT/usr/libexec/krotex/.xray-new.XXXXXX")"
 unzip -p "$WORK/core.zip" xray > "$NEW" || die 'Unable to extract Xray.'
 chmod 0755 "$NEW"
 "$NEW" version
-"$NEW" run -test -config "$SYSROOT/etc/krotex/config.json" || die 'The new core rejected the current configuration.'
+set -- run -test -config "$SYSROOT/etc/krotex/config.json"
+[ ! -r "$SYSROOT/usr/share/krotex/transparent.json" ] || set -- "$@" -config "$SYSROOT/usr/share/krotex/transparent.json"
+"$NEW" "$@" || die 'The new core rejected the current configuration.'
 if running; then WAS_RUNNING=1; else
 	[ "$?" -eq 1 ] || die 'Unable to query procd.'
 fi

@@ -75,12 +75,13 @@ action() {
 }
 
 case "$1" in
-	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{}}' ;;
+	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{},"devices":{},"routing":{},"set_routing":{"mac":"str","enabled":"bool"}}' ;;
 	call)
 		case "$2" in
 			status) status ;;
 			action) action ;;
 			connection|save_connection|test_connection) exec /usr/libexec/krotex/connection "$2" ;;
+			devices|routing|set_routing) exec /usr/libexec/krotex/routing "$2" ;;
 			*) exit 2 ;;
 		esac
 		;;

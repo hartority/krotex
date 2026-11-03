@@ -121,9 +121,11 @@ fi
 CORE="$SOURCE/package/krotex/files"
 LUCI="$SOURCE/package/luci-app-krotex"
 for path in "$CORE/krotex.init" "$CORE/config.json" \
+	"$CORE/routing.json" "$CORE/transparent.json" "$CORE/firewall.sh" "$CORE/40-krotex-routing" \
 	"$LUCI/htdocs/luci-static/resources/view/krotex/status.js" \
 	"$LUCI/htdocs/luci-static/resources/krotex/vless.js" \
 	"$LUCI/root/usr/libexec/krotex/connection" \
+	"$LUCI/root/usr/libexec/krotex/routing" \
 	"$LUCI/root/usr/libexec/rpcd/krotex" \
 	"$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" \
 	"$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json"; do
@@ -149,10 +151,10 @@ fi
 log 'Installing runtime dependencies...'
 if [ "$MANAGER" = opkg ]; then
 	opkg update
-	opkg install ca-bundle xray-core luci-base rpcd jshn ubus curl
+	opkg install ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy
 else
 	apk update
-	apk add ca-bundle xray-core luci-base rpcd jshn ubus curl
+	apk add ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy
 fi
 . "$SYSROOT/usr/share/libubox/jshn.sh"
 [ -x "$SYSROOT/etc/init.d/rpcd" ] || die 'rpcd init script is missing.'
@@ -172,19 +174,25 @@ CONFIG="$SYSROOT/etc/krotex/config.json"
 [ -f "$CONFIG" ] || CONFIG="$CORE/config.json"
 PROG="$SYSROOT/usr/bin/xray"
 [ ! -x "$SYSROOT/usr/libexec/krotex/xray" ] || PROG="$SYSROOT/usr/libexec/krotex/xray"
-"$PROG" run -test -config "$CONFIG"
+"$PROG" run -test -config "$CONFIG" -config "$CORE/transparent.json"
 
 cat > "$WORK/managed" <<'EOF'
 etc/init.d/krotex
 usr/libexec/rpcd/krotex
 usr/libexec/krotex/connection
+usr/libexec/krotex/routing
+usr/libexec/krotex/firewall
+usr/share/krotex/transparent.json
+etc/uci-defaults/40-krotex-routing
 usr/share/luci/menu.d/luci-app-krotex.json
 usr/share/rpcd/acl.d/luci-app-krotex.json
 www/luci-static/resources/view/krotex/status.js
 www/luci-static/resources/krotex/vless.js
 etc/krotex/config.json
+etc/krotex/routing.json
 etc/krotex/source-version
 etc/sysupgrade.conf
+etc/config/firewall
 EOF
 : > "$WORK/existing"
 while IFS= read -r path; do
@@ -208,8 +216,12 @@ copy_file() {
 	chmod "$3" "$2"
 }
 copy_file "$CORE/krotex.init" "$SYSROOT/etc/init.d/krotex" 0755
+copy_file "$CORE/firewall.sh" "$SYSROOT/usr/libexec/krotex/firewall" 0755
+copy_file "$CORE/transparent.json" "$SYSROOT/usr/share/krotex/transparent.json" 0644
+copy_file "$CORE/40-krotex-routing" "$SYSROOT/etc/uci-defaults/40-krotex-routing" 0755
 copy_file "$LUCI/root/usr/libexec/rpcd/krotex" "$SYSROOT/usr/libexec/rpcd/krotex" 0755
 copy_file "$LUCI/root/usr/libexec/krotex/connection" "$SYSROOT/usr/libexec/krotex/connection" 0755
+copy_file "$LUCI/root/usr/libexec/krotex/routing" "$SYSROOT/usr/libexec/krotex/routing" 0755
 copy_file "$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" "$SYSROOT/usr/share/luci/menu.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json" "$SYSROOT/usr/share/rpcd/acl.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/view/krotex/status.js" "$SYSROOT/www/luci-static/resources/view/krotex/status.js" 0644
@@ -217,6 +229,11 @@ copy_file "$LUCI/htdocs/luci-static/resources/krotex/vless.js" "$SYSROOT/www/luc
 if [ ! -f "$SYSROOT/etc/krotex/config.json" ]; then
 	copy_file "$CORE/config.json" "$SYSROOT/etc/krotex/config.json" 0600
 fi
+if [ ! -f "$SYSROOT/etc/krotex/routing.json" ]; then
+	copy_file "$CORE/routing.json" "$SYSROOT/etc/krotex/routing.json" 0600
+fi
+sh "$SYSROOT/etc/uci-defaults/40-krotex-routing"
+rm -f "$SYSROOT/etc/uci-defaults/40-krotex-routing"
 version="$(sed -n 's/^PKG_VERSION:=//p' "$SOURCE/package/krotex/Makefile")"
 printf '%s\n' "version=$version" "source=$REPOSITORY" "ref=$SOURCE_REF" > "$SYSROOT/etc/krotex/source-version"
 touch "$SYSROOT/etc/sysupgrade.conf"

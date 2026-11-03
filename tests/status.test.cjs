@@ -12,10 +12,12 @@ function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
-    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: []
+    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: [],
+    routing: { enabled: false, active: false, mac: '' }, routingCalls: [], routingCode: 0
   };
   const context = vm.createContext({
-    E: (tag, attrs, children) => ({ tag, attrs, children, style: {}, textContent: '' }),
+    E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '',
+      replaceChildren(...items) { this.children = items; } }),
     _: text => text,
     vless: { inspect: value => {
       if (value !== 'vless://valid') throw new Error('Invalid link');
@@ -23,7 +25,7 @@ function harness(writable = true) {
     } },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
-    rpc: { declare: spec => async action => {
+    rpc: { declare: spec => async (action, enabled) => {
       if (spec.method === 'status') {
         if (state.offline) throw new Error('RPC offline');
         return state.response;
@@ -34,6 +36,12 @@ function harness(writable = true) {
         return { code: state.connectionCode, message: 'Rejected' };
       }
       if (spec.method === 'test_connection') return { code: 0, ip: '203.0.113.2' };
+      if (spec.method === 'devices') return { devices: [{ name: 'Phone', address: '192.168.1.10', mac: '02:11:22:33:44:55' }] };
+      if (spec.method === 'routing') return state.routing;
+      if (spec.method === 'set_routing') {
+        state.routingCalls.push({ mac: action, enabled });
+        return { code: state.routingCode, message: 'Routing rejected' };
+      }
       state.actions.push(action);
       return { code: state.code };
     } },
@@ -158,4 +166,36 @@ test('connection check displays the exit IP', async () => {
   const state = harness();
   await state.view.handleConnection('test');
   assert.equal(state.view.connectionResult.textContent, 'Connection successful. Exit IP: 203.0.113.2');
+});
+
+test('DHCP selection sets the device MAC and applies only that device', async () => {
+  const state = harness();
+  await state.view.refreshDevices();
+  assert.equal(state.view.deviceSelect.children.length, 2);
+  state.view.deviceSelect.value = '02:11:22:33:44:55';
+  state.view.deviceSelect.attrs.change();
+  assert.equal(state.view.routingMac.value, '02:11:22:33:44:55');
+  await state.view.handleRouting(true);
+  assert.deepEqual(state.routingCalls, [{ mac: '02:11:22:33:44:55', enabled: true }]);
+  assert.equal(state.view.busy, false);
+});
+
+test('invalid MAC does not reach RPC and backend routing failure is displayed', async () => {
+  const state = harness();
+  state.view.routingMac.value = 'invalid';
+  await state.view.handleRouting(true);
+  assert.equal(state.routingCalls.length, 0);
+  state.view.routingMac.value = '02:11:22:33:44:55';
+  state.routingCode = 1;
+  await state.view.handleRouting(true);
+  assert.equal(state.view.routingResult.textContent, 'Routing rejected');
+  assert.equal(state.view.busy, false);
+});
+
+test('routing can be disabled even if the edited MAC is invalid', async () => {
+  const state = harness();
+  await state.view.refreshRouting();
+  state.view.routingMac.value = 'invalid';
+  await state.view.handleRouting(false);
+  assert.deepEqual(state.routingCalls, [{ mac: '', enabled: false }]);
 });

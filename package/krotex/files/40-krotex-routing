@@ -1,0 +1,10 @@
+#!/bin/sh
+
+uci -q batch <<'EOF'
+set firewall.krotex=include
+set firewall.krotex.type='script'
+set firewall.krotex.path='/usr/libexec/krotex/firewall'
+set firewall.krotex.fw4_compatible='1'
+set firewall.krotex.enabled='1'
+commit firewall
+EOF

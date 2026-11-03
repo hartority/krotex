@@ -1,0 +1,62 @@
+{
+  "inbounds": [
+    {
+      "tag": "device-tproxy",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      }
+    },
+    {
+      "tag": "device-dns",
+      "listen": "127.0.0.1",
+      "port": 10810,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "device-dns-proxy",
+      "protocol": "freedom",
+      "settings": {
+        "redirect": "1.1.1.1:53"
+      },
+      "streamSettings": {
+        "sockopt": {
+          "dialerProxy": "proxy"
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["device-dns"],
+        "outboundTag": "device-dns-proxy"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["device-tproxy", "local-socks"],
+        "outboundTag": "proxy"
+      }
+    ]
+  }
+}

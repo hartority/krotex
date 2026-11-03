@@ -71,7 +71,9 @@ sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/var/lock/krotex-setup.lock|$TEST_ROOT/var/lock/krotex-setup.lock|g" \
 	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
 	-e "s|/usr/libexec/krotex/xray|$TEST_ROOT/private-xray|g" \
+	-e "s|/usr/share/krotex/transparent.json|$WORK/transparent.json|g" \
 	package/luci-app-krotex/root/usr/libexec/krotex/connection > "$WORK/connection"
+cp package/krotex/files/transparent.json "$WORK/transparent.json"
 . "$RUNTIME/usr/share/libubox/jshn.sh"
 JSON_PREFIX=
 
@@ -201,3 +203,66 @@ json_get_var active running
 test "$active" = 0
 ! grep -q WARNING "$WORK/result"
 echo 'PASS: stopped-service RPC status stays valid JSON on OpenWrt 24.10 jshn'
+
+cp package/krotex/files/routing.json "$WORK/routing.json"
+cat > "$WORK/firewall" <<EOF
+#!/bin/sh
+case "\$1" in
+  status) test -f "$WORK/routing-active" ;;
+  apply)
+    if [ -f "$WORK/routing-fail" ]; then rm "$WORK/routing-fail"; exit 1; fi
+    if grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$WORK/routing.json"; then
+      touch "$WORK/routing-active"
+    else rm -f "$WORK/routing-active"; fi ;;
+esac
+EOF
+chmod 0755 "$WORK/firewall"
+sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
+	-e "s|/etc/krotex/routing.json|$WORK/routing.json|g" \
+	-e "s|/etc/krotex/config.json|$TEST_ROOT/etc/krotex/config.json|g" \
+	-e "s|/usr/libexec/krotex/firewall|$WORK/firewall|g" \
+	-e "s|/var/lock/krotex-setup.lock|$TEST_ROOT/var/lock/krotex-setup.lock|g" \
+	-e "s|/var/run/krotex/routing-service-active|$WORK/service-active|g" \
+	-e "s|/etc/krotex/.routing.|$TEST_ROOT/etc/krotex/.routing.|g" \
+	-e "s|/tmp/dhcp.leases|$WORK/leases|g" \
+	package/luci-app-krotex/root/usr/libexec/krotex/routing > "$WORK/routing"
+call_routing() {
+	"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
+		"$RUNTIME/bin/busybox" ash "$WORK/routing" "$1" < "$WORK/request" > "$WORK/result"
+}
+printf '0 02:11:22:33:44:55 192.168.1.10 phone *\n0 invalid 192.168.1.11 invalid *\n' > "$WORK/leases"
+call_routing devices
+json_load "$(cat "$WORK/result")"
+json_select devices; json_get_keys keys
+set -- $keys
+test "$#" -eq 1 && test "$1" = 1
+echo 'PASS: DHCP discovery returns valid devices and skips malformed MAC addresses'
+
+printf '{"enabled":true,"mac":"02:11:22:33:44:55"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 1
+touch "$WORK/service-active"
+call_routing set_routing
+expect_code 0
+test -f "$WORK/routing-active"
+cp "$WORK/routing.json" "$WORK/routing-previous"
+printf '{"enabled":true,"mac":"ff:ff:ff:ff:ff:ff"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 1
+cmp "$WORK/routing-previous" "$WORK/routing.json"
+echo 'PASS: routing requires a running service and rejects broadcast MACs'
+
+touch "$WORK/routing-fail"
+printf '{"enabled":true,"mac":"02:aa:bb:cc:dd:ee"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 1
+cmp "$WORK/routing-previous" "$WORK/routing.json"
+test -f "$WORK/routing-active"
+echo 'PASS: firewall failure restores previous routing settings'
+
+rm "$WORK/service-active"
+printf '{"enabled":false,"mac":""}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+test ! -f "$WORK/routing-active"
+echo 'PASS: device routing can be disabled even when the service is stopped'

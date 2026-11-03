@@ -185,7 +185,9 @@ save() {
 	umask 077
 	WORK="$(mktemp -d /etc/krotex/.apply.XXXXXX)" || fail 'Unable to create temporary files.'
 	generate > "$WORK/config.json" || fail 'Unable to generate Xray configuration.'
-	"$PROG" run -test -config "$WORK/config.json" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
+	set -- run -test -config "$WORK/config.json"
+	[ ! -r /usr/share/krotex/transparent.json ] || set -- "$@" -config /usr/share/krotex/transparent.json
+	"$PROG" "$@" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
 	if running; then WAS_RUNNING=1; else
 		[ "$?" -eq 1 ] || fail 'Unable to query procd.'
 	fi

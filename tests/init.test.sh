@@ -8,6 +8,7 @@ test_dir="$(mktemp -d)"
 trap 'rm -f "$test_dir/xray" "$test_dir/private-xray" "$test_dir/init" "$test_dir/config.json" "$test_dir/events"; rmdir "$test_dir"' EXIT
 PROG="$test_dir/xray"
 CONF="$test_dir/config.json"
+TRANSPARENT=./package/krotex/files/transparent.json
 EVENTS="$test_dir/events"
 export EVENTS
 printf '{}\n' > "$CONF"
