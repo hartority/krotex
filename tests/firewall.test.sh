@@ -510,7 +510,8 @@ ucode package/krotex/files/sections.uc compile "$WORK/client.json" "$WORK/sectio
 python3 tests/sections-traffic.py "$WORK" trust
 cp "$WORK/sections-client.json" "$WORK/core-config.json"
 "$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
-PIDS="$PIDS $!"
+SECTIONS_PID=$!
+PIDS="$PIDS $SECTIONS_PID"
 sleep 1
 probe_section unmatched.krotex.test direct
 probe_section one.krotex.test section-vpn1
@@ -561,3 +562,36 @@ if curl --silent --noproxy '' --proxy socks5h://127.0.0.1:11180 --max-time 3 -o 
 	echo 'FAIL: isolated profile check bypassed the failed VPN server' >&2; exit 1
 fi
 echo 'PASS: the isolated overview probe reports a failed VPN without direct fallback'
+
+
+kill "$SECTIONS_PID"
+wait "$SECTIONS_PID" 2>/dev/null || :
+python3 tests/sections-traffic.py "$WORK" ip-rules
+ucode package/krotex/files/sections.uc compile "$WORK/core-config.json" "$WORK/sections-ip-request.json" > "$WORK/sections-client.json"
+python3 tests/sections-traffic.py "$WORK" trust
+cp "$WORK/sections-client.json" "$WORK/core-config.json"
+"$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
+PIDS="$PIDS $!"
+nsenter -t "$WAN" -n ip addr add 93.184.216.35/32 dev lo
+nsenter -t "$WAN" -n ip addr add 93.184.217.34/32 dev lo
+ip route add 93.184.216.35/32 via 192.0.2.2
+ip route add 93.184.217.34/32 via 192.0.2.2
+sleep 1
+printf '{"enabled":true,"mode":"selected","macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
+fw apply
+probe_destination() {
+	local host="$1" address="$2" tag="$3" before code
+	before="$(wc -l < "$WORK/sections-client.log")"
+	if code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 6 --resolve "$host:8080:$address" -o /dev/null -w '%{http_code}' "http://$host:8080/" 2> "$WORK/ip-probe-error")"; then
+		test "$tag" != block && test "$code" = 403
+	else
+		test "$tag" = block
+	fi
+	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq "device-tproxy (>>|->) $tag]"
+}
+probe_destination 93.184.216.34 93.184.216.34 direct
+probe_destination 93.184.216.35 93.184.216.35 block
+probe_destination unknown.krotex.test 93.184.216.35 block
+probe_destination allowed-ip.krotex.test 93.184.216.35 direct
+probe_destination 93.184.217.34 93.184.217.34 section-ip-vpn
+echo 'PASS: exact IP exceptions, subnet blocking, domain exceptions and subnet VPN routes work through real TPROXY'

@@ -52,7 +52,7 @@ return baseclass.extend({
 				var url = section.profile ? (section.profile.url || vless.format(section.profile)) : '';
 				return { id: section.id, name: section.name, mode: section.mode,
 					enabled: section.enabled, fallback: section.fallback,
-					domains: typeof section.domains_text === 'string' ? section.domains_text : (section.domains || []).join('\n'),
+					domains: typeof section.domains_text === 'string' ? section.domains_text : (section.domains || []).concat(section.ips || []).join('\n'),
 					url: url, editingConnection: !url, macs: (section.macs || []).slice() };
 			});
 			this.loaded = true;
@@ -244,7 +244,7 @@ return baseclass.extend({
 				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;align-self:stretch;width:3.4em;margin:0'
 			}, [ enabled, track ]);
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
-				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
+				'placeholder': 'youtube.com\n1.2.3.4\n93.184.216.0/24', 'aria-label': _('Routing destinations'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
 			domains.value = section.domains;
 			var indices = deviceVpn ? deviceIndices : generalIndices;
@@ -326,7 +326,7 @@ return baseclass.extend({
 			}
 			if (deviceVpn) fields.push(this.renderAssignedDevices(section));
 			else if (section.mode !== 'unconfigured')
-				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains);
+				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains, IPv4 addresses and subnets (one per line)')), domains);
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
 			if (actionRow) fields.push(actionRow);
@@ -436,8 +436,8 @@ return baseclass.extend({
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
 		this.generalPanel = E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Smart routing')),
-			E('p', {}, _('Choose which websites use VPN, connect directly, or are blocked. Sections are checked from top to bottom; the first match wins.')),
-			E('p', {}, _('Choose below which devices use these rules. Connections without a visible hostname use the route for unmatched traffic.')),
+			E('p', {}, _('Choose which websites, IPv4 addresses and subnets use VPN, connect directly, or are blocked. Sections are checked from top to bottom; the first match wins.')),
+			E('p', {}, _('Domains include subdomains. IP rules match destination addresses. Choose below which devices use these rules.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
 			]), this.cards

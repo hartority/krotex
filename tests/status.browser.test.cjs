@@ -181,7 +181,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(output.textContent==='Proxy connection failed','error is missing from its section');
           check(getComputedStyle(output).color==='rgb(217, 48, 37)','connection error is not red');
           check(!editor.result.textContent.includes('Proxy connection failed'),'connection error appeared below all sections');
-          const domainsLabel=Array.from(card(1).querySelectorAll('label')).find(l=>l.textContent.startsWith('Domains'));
+          const domainsLabel=Array.from(card(1).querySelectorAll('label')).find(l=>l.textContent.startsWith('Domains, IPv4'));
           check(checkButton.parentElement===card(1).lastElementChild,'section actions are not the final row');
           check(checkButton.parentElement.getBoundingClientRect().y>domainsLabel.getBoundingClientRect().bottom,'section actions appear above the domain settings');
           checkFailure=false;
@@ -267,7 +267,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           page.tabButtons.devices.click();await pause();
           editor.topControls[4].click();await pause();
           let deviceCard=editor.deviceCards.children[0];
-          check(deviceCard.querySelector('[aria-label="Section route"]').value==='proxy'&&deviceCard.querySelector('[aria-label="Section route"]').disabled&&!deviceCard.querySelector('[aria-label="Domains"]'),'device VPN must show a disabled Xray selector and device settings');
+          check(deviceCard.querySelector('[aria-label="Section route"]').value==='proxy'&&deviceCard.querySelector('[aria-label="Section route"]').disabled&&!deviceCard.querySelector('[aria-label="Routing destinations"]'),'device VPN must show a disabled Xray selector and device settings');
           check(deviceCard.querySelector('[aria-label="Move section up"]')&&deviceCard.querySelector('[aria-label="Move section down"]'),'device VPN is missing shared ordering buttons');
           const deviceLink=deviceCard.querySelector('[aria-label="VLESS link"]');
           deviceLink.value=link;deviceLink.dispatchEvent(new Event('input'));

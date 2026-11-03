@@ -231,7 +231,7 @@ test('Block configures domains without VLESS and saves through the shared sectio
   assert.equal(editor.sections[1].enabled,true);
   assert.equal(controls(editor,'Section route')[1].value,'block');
   assert.equal(controls(editor,'VLESS link').length,0);
-  controls(editor,'Domains')[1].attrs.input({target:{value:'blocked.example'}});
+  controls(editor,'Routing destinations')[1].attrs.input({target:{value:'blocked.example'}});
   editor.fallbackSelect.value=editor.sections[1].id;editor.handleFallbackChange();
   assert.equal(editor.sections[1].fallback,true);
   assert.match(editor.fallbackSelect.children[2].children,/Block/);
@@ -246,11 +246,11 @@ test('Block configures domains without VLESS and saves through the shared sectio
 test('domain comments, blank lines and spacing survive save and reload',async()=>{
   const state=harness(),editor=state.editor;await editor.load();
   const source='#ip-api.com\n\n  # temporarily disabled\nExample.com\n  youtube.com  \n';
-  controls(editor,'Domains')[0].attrs.input({target:{value:source}});
+  controls(editor,'Routing destinations')[0].attrs.input({target:{value:source}});
   await editor.save();
   assert.equal(state.saved[0][0].domains_text,source);
   assert.equal(editor.sections[0].domains,source);
-  assert.equal(controls(editor,'Domains')[0].value,source);
+  assert.equal(controls(editor,'Routing destinations')[0].value,source);
 });
 
 
@@ -265,7 +265,7 @@ test('device VPN cards are separate, persist assigned devices and never become a
   assert.equal(controls(editor,'Section route')[1].value,'proxy');
   assert.equal(controls(editor,'Section route')[1].disabled,true);
   chooseMode(editor,1,'block');assert.equal(device.mode,'proxy_devices');
-  assert.equal(controls(editor,'Domains').length,1);
+  assert.equal(controls(editor,'Routing destinations').length,1);
   assert.equal(editor.fallbackSelect.children.length,2);
   await editor.save();
   assert.equal(state.saved[0][1].mode,'proxy_devices');
@@ -300,4 +300,16 @@ test('device VPN ordering stays within its own group and survives saving',async(
   await editor.save();
   assert.equal(editor.sections[1].id,second.id);assert.equal(editor.sections[3].id,first.id);
   assert.ok(controls(editor,'Section route').filter(c=>c.krotexBoundary).every(c=>c.disabled&&c.value==='proxy'));
+});
+
+
+test('the destinations editor preserves mixed IP rules and loads older IP metadata',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  const source='# paused\nexample.com\n1.2.3.4\n8.8.8.0/24\n';
+  controls(editor,'Routing destinations')[0].attrs.input({target:{value:source}});
+  await editor.save();
+  assert.equal(editor.sections[0].domains,source);
+  assert.deepEqual(state.saved[0][0].domains,['example.com','1.2.3.4','8.8.8.0/24']);
+  state.sections[0].ips=['9.9.9.0/24'];state.sections[0].domains=['example.com'];delete state.sections[0].domains_text;
+  await editor.load();assert.equal(controls(editor,'Routing destinations')[0].value,'example.com\n9.9.9.0/24');
 });

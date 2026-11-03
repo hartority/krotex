@@ -194,3 +194,27 @@ test('overview deduplicates runtime profiles and probes inactive saved connectio
     }
   } finally {rmSync(work,{recursive:true,force:true});}
 });
+
+
+test('mixed domain, IPv4 and CIDR destinations are OR rules with section priority preserved', {skip:!runtime}, () => {
+  const source='# paused\nexample.com\n1.2.3.4\n8.8.8.123/24\n8.8.8.0/24\n';
+  const config=run('compile',[{...section('vpn','proxy'),domains_text:source},section('deny','block',['8.8.0.0/16']),section('direct','direct',['9.9.9.9'])]);
+  const rules=config.routing.rules.filter(r=>r.inboundTag.includes('device-tproxy'));
+  assert.deepEqual(rules.map(r=>r.outboundTag),['section-vpn','section-vpn','block','direct','direct']);
+  assert.deepEqual(rules[0].domain,['domain:example.com']);assert.equal(rules[0].ip,undefined);
+  assert.deepEqual(rules[1].ip,['1.2.3.4','8.8.8.0/24']);assert.equal(rules[1].domain,undefined);
+  assert.equal(config.krotex_sections[0].domains_text,source);
+  assert.deepEqual(config.krotex_sections[0].ips,['1.2.3.4','8.8.8.0/24']);
+  const normalized={...config.krotex_sections[0]};delete normalized.domains_text;
+  assert.deepEqual(run('compile',[normalized]).krotex_sections[0].ips,normalized.ips,'recompiling saved metadata must retain its IPs');
+  assert.deepEqual(run('compile',[section('all','direct',['1.2.3.4/0','1.2.3.4/32'])]).krotex_sections[0].ips,['0.0.0.0/0','1.2.3.4/32']);
+  for(const value of ['256.2.3.4','1.2.3','1.2.3.4/33','1.2.3.4/-1','1.2.3.4/abc','1.2.3.4/24/5','example.com/24','2001:db8::1'])
+    assert.throws(()=>run('compile',[section('bad','direct',[value])]));
+  if(process.env.XRAY_TEST_BINARY) {
+    const work=mkdtempSync(join(tmpdir(),'krotex-ip-rules-'));
+    try {
+      const path=join(work,'config.json');writeFileSync(path,JSON.stringify(config));
+      execFileSync(process.env.XRAY_TEST_BINARY,['run','-test','-config',resolve(__dirname,'../package/krotex/files/transparent.json'),'-config',path],{stdio:'pipe'});
+    } finally {rmSync(work,{recursive:true,force:true});}
+  }
+});

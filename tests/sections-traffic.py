@@ -6,6 +6,19 @@ import hashlib
 from pathlib import Path
 
 work = Path(sys.argv[1])
+if len(sys.argv) > 2 and sys.argv[2] == "ip-rules":
+    config = json.loads((work / "core-config.json").read_text())
+    profile = next(section["profile"] for section in config["krotex_sections"] if section["id"] == "vpn2")
+    sections = [
+        {"id": "allow", "name": "Exceptions", "mode": "direct", "enabled": True, "fallback": False,
+         "domains": ["allowed-ip.krotex.test", "93.184.216.34"]},
+        {"id": "deny", "name": "Subnet block", "mode": "block", "enabled": True, "fallback": False,
+         "domains": ["93.184.216.99/24"]},
+        {"id": "ip-vpn", "name": "Subnet VPN", "mode": "proxy", "enabled": True, "fallback": False,
+         "domains": ["93.184.217.0/24"], "profile": profile}
+    ]
+    (work / "sections-ip-request.json").write_text(json.dumps({"sections": json.dumps(sections)}))
+    sys.exit(0)
 if len(sys.argv) > 2 and sys.argv[2] == "trust":
     # Xray uses its bundled trust roots. Pin the fixture certificate locally;
     # keep certificate verification enabled and leave host trust stores alone.

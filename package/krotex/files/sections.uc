@@ -89,6 +89,22 @@ function device_macs(input) {
 	return macs;
 }
 
+function ipv4_destination(value) {
+	let parts = split(value, '/');
+	check(length(parts) <= 2, 'Invalid IP address or subnet: ' + value);
+	let address = iptoarr(parts[0]);
+	check(address && length(address) == 4, 'Enter a valid IPv4 address or subnet: ' + value);
+	if (length(parts) == 1) return arrtoip(address);
+	check(match(parts[1], /^[0-9]{1,2}$/) && int(parts[1], 10) <= 32, 'IPv4 subnet prefix must be between 0 and 32: ' + value);
+	let prefix = int(parts[1], 10), remaining = prefix;
+	for (let i = 0; i < 4; i++) {
+		if (remaining >= 8) remaining -= 8;
+		else if (remaining <= 0) address[i] = 0;
+		else { address[i] &= 255 << (8 - remaining); remaining = 0; }
+	}
+	return arrtoip(address) + '/' + prefix;
+}
+
 function normalize(input) {
 	check(type(input) == 'array' && length(input) <= 32, 'A maximum of 32 sections is supported.');
 	let sections = [], ids = {}, defaults = 0, domain_count = 0, assigned = {}, device_count = 0;
@@ -108,25 +124,34 @@ function normalize(input) {
 			check(item.enabled, 'The default section must be enabled.');
 			check(++defaults == 1, 'Only one section can handle unmatched traffic.');
 		}
-		check(type(item.domains) == 'array', 'Enter a list of domains.');
+		check(type(item.domains) == 'array', 'Enter a list of destinations.');
 		let source = item.domains;
+		if (item.ips != null) { check(type(item.ips) == 'array', 'Enter a list of IP addresses.'); source = [ ...source, ...item.ips ]; }
 		if (item.domains_text != null)
 			source = split(text(item.domains_text, 131072, 'domain list text'), '\n');
-		let domains = [], seen = {};
+		let domains = [], ips = [], seen = {};
 		for (let value in source) {
 			if (item.domains_text != null && (!length(trim(value)) || match(trim(value), /^#/))) continue;
-			let domain = lc(trim(text(value, 253, 'domain')));
+			let domain = lc(trim(text(value, 253, 'destination')));
+			if (index(domain, '/') >= 0 || index(domain, ':') >= 0 || match(domain, /^[0-9.]+$/)) {
+				let ip = ipv4_destination(domain);
+				if (seen[ip]) continue;
+				seen[ip] = true;
+				check(++domain_count <= 8192, 'A maximum of 8192 destinations is supported.');
+				push(ips, ip); continue;
+			}
 			domain = replace(domain, /^\*\./, '');
 			domain = replace(domain, /\.$/, '');
-			check(length(domain) && !match(domain, /[^a-z0-9.-]/) && !match(domain, /^[0-9.]+$/), 'Enter domain names, without URLs, paths or IP addresses.');
+			check(length(domain) && !match(domain, /[^a-z0-9.-]/) && !match(domain, /^[0-9.]+$/), 'Enter a domain, IPv4 address or CIDR subnet, without URLs or paths.');
 			for (let label in split(domain, '.'))
 				check(length(label) <= 63 && match(label, /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/), 'Invalid domain: ' + domain);
 			if (seen[domain]) continue;
 			seen[domain] = true;
-			check(++domain_count <= 8192, 'A maximum of 8192 domains is supported.');
+			check(++domain_count <= 8192, 'A maximum of 8192 destinations is supported.');
 			push(domains, domain);
 		}
 		let section = { id, name, mode: item.mode, enabled: item.enabled, fallback: item.fallback, domains };
+		if (length(ips)) section.ips = ips;
 		if (item.domains_text != null) section.domains_text = item.domains_text;
 		if (item.mode == 'proxy_devices') {
 			section.macs = device_macs(item.macs);
@@ -138,6 +163,7 @@ function normalize(input) {
 			}
 			section.domains = [];
 			delete section.domains_text;
+			delete section.ips;
 		}
 		if ((item.mode == 'proxy' || item.mode == 'proxy_devices') && (item.enabled || item.profile != null)) section.profile = proxy_profile(item.profile);
 		push(sections, section);
@@ -175,6 +201,8 @@ function compile(sections) {
 		if (section.fallback) fallback = tag;
 		if (length(section.domains))
 			push(rules, { type: 'field', inboundTag: traffic, domain: map(section.domains, d => 'domain:' + d), outboundTag: tag });
+		if (length(section.ips || []))
+			push(rules, { type: 'field', inboundTag: traffic, ip: section.ips, outboundTag: tag });
 	}
 	if (filter(sections, s => s.enabled && s.mode == 'block')[0])
 		push(outbounds, { tag: 'block', protocol: 'blackhole', settings: { response: { type: 'none' } } });
