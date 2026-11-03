@@ -15,6 +15,7 @@ mkdir -p "$WORK/source" "$WORK/bin" "$TEST_ROOT/etc/init.d" \
 cp -R package "$WORK/source/"
 cp update.sh "$WORK/source/"
 sed "s|^SYSROOT=\$|SYSROOT=$TEST_ROOT|" install.sh > "$WORK/source/install.sh"
+sed "s|^SYSROOT=\$|SYSROOT=$TEST_ROOT|" update-core.sh > "$WORK/source/update-core.sh"
 touch "$TEST_ROOT/etc/openwrt_release"
 
 cat > "$WORK/bin/id" <<'EOF'
@@ -55,6 +56,7 @@ json_get_var() { running=1; }
 EOF
 cat > "$TEST_ROOT/usr/bin/xray" <<'EOF'
 #!/bin/sh
+if [ "$1" = version ]; then echo 'Xray 26.10.21 (package test)'; exit 0; fi
 test ! -f "$TEST_ROOT/invalid-config"
 EOF
 cat > "$TEST_ROOT/etc/init.d/rpcd" <<'EOF'
@@ -149,6 +151,7 @@ case "$url" in
   https://github.com/XTLS/Xray-core/releases/download/*.zip.dgst)
     printf 'SHA2-256= %s\n' "$TEST_CORE_DIGEST" > "$destination" ;;
   https://github.com/XTLS/Xray-core/releases/download/*.zip)
+    echo download >> "$TEST_ROOT/core-downloads"
     printf '%s\n' "$url" > "$TEST_ROOT/core-url"
     cp "$TEST_CORE_FILE" "$destination" ;;
   https://raw.githubusercontent.com/*)
@@ -211,7 +214,7 @@ cat "$2"
 EOF
 chmod 0755 "$WORK/bin/uname" "$WORK/bin/unzip"
 cp "$TEST_ROOT/usr/bin/xray" "$WORK/package-xray"
-sh "$WORK/source/update-core.sh" > "$WORK/core.log" 2>&1 || { cat "$WORK/core.log"; exit 1; }
+sh "$WORK/source/update-core.sh" --force > "$WORK/core.log" 2>&1 || { cat "$WORK/core.log"; exit 1; }
 test -x "$TEST_ROOT/usr/libexec/krotex/xray"
 test -f "$TEST_ROOT/running"
 cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"
@@ -221,7 +224,7 @@ echo 'PASS: official core installs privately and preserves the package-managed c
 cp "$TEST_ROOT/usr/libexec/krotex/xray" "$WORK/previous-core"
 TEST_CORE_DIGEST="$(printf '%064d' 0)"
 export TEST_CORE_DIGEST
-if sh "$WORK/source/update-core.sh" > "$WORK/checksum.log" 2>&1; then
+if sh "$WORK/source/update-core.sh" --force > "$WORK/checksum.log" 2>&1; then
   echo 'FAIL: corrupt archive accepted' >&2
   exit 1
 fi
@@ -234,7 +237,7 @@ TEST_CORE_DIGEST="$(sha256sum "$TEST_CORE_FILE")"
 TEST_CORE_DIGEST=${TEST_CORE_DIGEST%% *}
 export TEST_CORE_DIGEST
 touch "$TEST_ROOT/fail-core-start"
-if sh "$WORK/source/update-core.sh" > "$WORK/core-rollback.log" 2>&1; then
+if sh "$WORK/source/update-core.sh" --force > "$WORK/core-rollback.log" 2>&1; then
   echo 'FAIL: core startup failure ignored' >&2
   exit 1
 fi
@@ -249,3 +252,60 @@ cmp "$WORK/previous-core" "$TEST_ROOT/usr/libexec/krotex/xray"
 cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"
 rm "$TEST_ROOT/invalid-config"
 echo 'PASS: application updates validate with and retain the private core'
+
+# A single update upgrades the core, then leaves matching versions alone.
+sed 's/26.10.21/25.1.30/' "$TEST_ROOT/usr/libexec/krotex/xray" > "$WORK/old-core"
+cp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+downloads_before="$(wc -l < "$TEST_ROOT/core-downloads")"
+sh "$WORK/bootstrap/update.sh" --ref v0.3.0 > "$WORK/unified.log" 2>&1 || { cat "$WORK/unified.log"; exit 1; }
+"$TEST_ROOT/usr/libexec/krotex/xray" version | grep -q '26.10.21'
+test "$(wc -l < "$TEST_ROOT/core-downloads")" -eq "$((downloads_before + 1))"
+test -f "$TEST_ROOT/running"
+cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"
+echo 'PASS: one application update also upgrades an outdated private core'
+
+downloads_before="$(wc -l < "$TEST_ROOT/core-downloads")"
+sh "$WORK/source/update.sh" > "$WORK/current-core.log" 2>&1 || { cat "$WORK/current-core.log"; exit 1; }
+test "$(wc -l < "$TEST_ROOT/core-downloads")" -eq "$downloads_before"
+echo 'PASS: a repeated application update does not download the same core again'
+
+cp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+cp "$TEST_ROOT/etc/init.d/krotex" "$WORK/unified-previous.init"
+cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/unified-previous.json"
+TEST_CORE_DIGEST="$(printf '%064d' 0)"
+export TEST_CORE_DIGEST
+if sh "$WORK/source/update.sh" > "$WORK/unified-checksum.log" 2>&1; then
+  echo 'FAIL: unified update accepted a corrupt core archive' >&2
+  exit 1
+fi
+cmp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+cmp "$WORK/unified-previous.init" "$TEST_ROOT/etc/init.d/krotex"
+test -f "$TEST_ROOT/running"
+test ! -d "$TEST_ROOT/var/lock/krotex-setup.lock"
+echo 'PASS: a bad core download leaves both the old app and running core intact'
+
+TEST_CORE_DIGEST="$(sha256sum "$TEST_CORE_FILE")"
+TEST_CORE_DIGEST=${TEST_CORE_DIGEST%% *}
+export TEST_CORE_DIGEST
+touch "$TEST_ROOT/fail-rpcd"
+if sh "$WORK/source/update.sh" > "$WORK/unified-rollback.log" 2>&1; then
+  echo 'FAIL: unified deployment failure ignored' >&2
+  exit 1
+fi
+cmp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+cmp "$WORK/unified-previous.init" "$TEST_ROOT/etc/init.d/krotex"
+cmp "$WORK/unified-previous.json" "$TEST_ROOT/etc/krotex/config.json"
+test -f "$TEST_ROOT/running"
+test -f "$TEST_ROOT/enabled"
+echo 'PASS: a failed application deployment rolls back the app and newly switched core together'
+
+# The preparer must work before first installation and retain its parent's lock.
+mv "$TEST_ROOT/etc/init.d/krotex" "$WORK/temporarily-hidden.init"
+mkdir "$TEST_ROOT/var/lock/krotex-setup.lock"
+sh "$WORK/source/update-core.sh" --prepare "$WORK/prepared-core" > "$WORK/prepare.log" 2>&1 || { cat "$WORK/prepare.log"; exit 1; }
+test -x "$WORK/prepared-core"
+test -d "$TEST_ROOT/var/lock/krotex-setup.lock"
+cmp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+rmdir "$TEST_ROOT/var/lock/krotex-setup.lock"
+mv "$WORK/temporarily-hidden.init" "$TEST_ROOT/etc/init.d/krotex"
+echo 'PASS: preparation needs no installed init script and retains the parent update lock'

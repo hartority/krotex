@@ -12,6 +12,8 @@ CHANGED=0
 WAS_RUNNING=0
 WAS_ENABLED=0
 BACKUP=
+CORE_TEMP=
+REPLACE_CORE=0
 
 log() { printf '[Krotex] %s\n' "$*"; }
 die() { log "$*" >&2; exit 1; }
@@ -69,6 +71,7 @@ cleanup() {
 		clear_cache || :
 		"$SYSROOT/etc/init.d/rpcd" restart || :
 	fi
+	[ -z "$CORE_TEMP" ] || rm -f "$CORE_TEMP"
 	[ -z "$WORK" ] || rm -rf "$WORK"
 	rmdir "$SYSROOT/var/lock/krotex-setup.lock" 2>/dev/null || :
 	exit "$code"
@@ -120,7 +123,7 @@ fi
 
 CORE="$SOURCE/package/krotex/files"
 LUCI="$SOURCE/package/luci-app-krotex"
-for path in "$CORE/krotex.init" "$CORE/config.json" \
+for path in "$SOURCE/update-core.sh" "$CORE/krotex.init" "$CORE/config.json" \
 	"$CORE/routing.json" "$CORE/transparent.json" "$CORE/firewall.sh" "$CORE/40-krotex-routing" \
 	"$LUCI/htdocs/luci-static/resources/view/krotex/status.js" \
 	"$LUCI/htdocs/luci-static/resources/krotex/vless.js" \
@@ -174,6 +177,17 @@ CONFIG="$SYSROOT/etc/krotex/config.json"
 [ -f "$CONFIG" ] || CONFIG="$CORE/config.json"
 PROG="$SYSROOT/usr/bin/xray"
 [ ! -x "$SYSROOT/usr/libexec/krotex/xray" ] || PROG="$SYSROOT/usr/libexec/krotex/xray"
+CORE_VERSION="$(sed -n 's/^VERSION=//p' "$SOURCE/update-core.sh")"
+case "$CORE_VERSION" in ''|*[!0-9.]*) die 'Invalid required Xray version in this release.' ;; esac
+installed_core="$("$PROG" version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
+if [ "$installed_core" = "$CORE_VERSION" ]; then
+	log "Xray $CORE_VERSION is already installed; no download needed."
+else
+	# Preparation shares this installer's lock and never touches the live core.
+	sh "$SOURCE/update-core.sh" --prepare "$WORK/new-core" --version "$CORE_VERSION"
+	PROG="$WORK/new-core"
+	REPLACE_CORE=1
+fi
 "$PROG" run -test -config "$CONFIG" -config "$CORE/transparent.json"
 
 cat > "$WORK/managed" <<'EOF'
@@ -194,6 +208,9 @@ etc/krotex/source-version
 etc/sysupgrade.conf
 etc/config/firewall
 EOF
+if [ "$REPLACE_CORE" -eq 1 ]; then
+	printf 'usr/libexec/krotex/xray\n' >> "$WORK/managed"
+fi
 : > "$WORK/existing"
 while IFS= read -r path; do
 	[ ! -e "$SYSROOT/$path" ] || printf '%s\n' "$path" >> "$WORK/existing"
@@ -217,6 +234,12 @@ copy_file() {
 }
 copy_file "$CORE/krotex.init" "$SYSROOT/etc/init.d/krotex" 0755
 copy_file "$CORE/firewall.sh" "$SYSROOT/usr/libexec/krotex/firewall" 0755
+if [ "$REPLACE_CORE" -eq 1 ]; then
+	CORE_TEMP="$(mktemp "$SYSROOT/usr/libexec/krotex/.xray-install.XXXXXX")"
+	copy_file "$WORK/new-core" "$CORE_TEMP" 0755
+	mv -f "$CORE_TEMP" "$SYSROOT/usr/libexec/krotex/xray"
+	CORE_TEMP=
+fi
 copy_file "$CORE/transparent.json" "$SYSROOT/usr/share/krotex/transparent.json" 0644
 copy_file "$CORE/40-krotex-routing" "$SYSROOT/etc/uci-defaults/40-krotex-routing" 0755
 copy_file "$LUCI/root/usr/libexec/rpcd/krotex" "$SYSROOT/usr/libexec/rpcd/krotex" 0755

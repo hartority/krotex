@@ -20,7 +20,8 @@ if [ -f "$SOURCE/install.sh" ]; then
 	exec sh "$SOURCE/install.sh" --update "$@"
 fi
 
-# A standalone copy of update.sh bootstraps the installer from GitHub.
+# The installer updates the app and its required core in one transaction.
+# A standalone copy of update.sh bootstraps it from GitHub.
 WORK="$(mktemp -d /tmp/krotex-update.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 trap 'exit 1' HUP INT TERM

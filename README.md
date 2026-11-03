@@ -14,6 +14,8 @@ wget -O /tmp/krotex-install.sh https://raw.githubusercontent.com/hartority/krote
 
 ## Обновление
 
+Обновляет Krotex и нужную версию ядра Xray с сохранением настроек.
+
 ```sh
 wget -O /tmp/krotex-update.sh https://raw.githubusercontent.com/hartority/krotex/main/update.sh && sh /tmp/krotex-update.sh
 ```

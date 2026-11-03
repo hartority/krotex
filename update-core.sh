@@ -12,6 +12,9 @@ PREVIOUS=
 CHANGED=0
 WAS_RUNNING=0
 HAD_PRIVATE=0
+LOCKED=0
+PREPARE=
+FORCE=0
 
 log() { printf '[Krotex] %s\n' "$*"; }
 die() { log "$*" >&2; exit 1; }
@@ -52,21 +55,37 @@ cleanup() {
 	[ -z "$NEW" ] || rm -f "$NEW"
 	[ -z "$PREVIOUS" ] || rm -f "$PREVIOUS"
 	[ -z "$WORK" ] || rm -rf "$WORK"
-	rmdir "$LOCK" 2>/dev/null || :
+	[ "$LOCKED" -eq 0 ] || rmdir "$LOCK" 2>/dev/null || :
 	exit "$code"
 }
 
-case "$#" in
-	0) ;;
-	1) case "$1" in -h|--help) printf 'Usage: sh update-core.sh [--version VERSION]\n'; exit 0 ;; *) exit 2 ;; esac ;;
-	2) [ "$1" = --version ] || exit 2; VERSION=$2 ;;
-	*) exit 2 ;;
-esac
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--version|--prepare)
+			[ "$#" -ge 2 ] || exit 2
+			case "$1" in --version) VERSION=$2 ;; --prepare) PREPARE=$2 ;; esac
+			shift
+			;;
+		--force) FORCE=1 ;;
+		-h|--help) printf 'Usage: sh update-core.sh [--version VERSION] [--force]\n'; exit 0 ;;
+		*) exit 2 ;;
+	esac
+	shift
+done
 case "$VERSION" in ''|*[!0-9.]*|.*|*.) die 'Invalid Xray version.' ;; esac
 [ "$(id -u)" -eq 0 ] || die 'Run as root on the OpenWrt router.'
 [ -f "$SYSROOT/etc/openwrt_release" ] || die 'OpenWrt is required.'
-[ -x "$INIT" ] || die 'Install Krotex first.'
-grep -q '/usr/libexec/krotex/xray' "$INIT" || die 'Update Krotex before updating its core.'
+if [ -z "$PREPARE" ]; then
+	[ -x "$INIT" ] || die 'Install Krotex first.'
+	grep -q '/usr/libexec/krotex/xray' "$INIT" || die 'Update Krotex before updating its core.'
+	CURRENT="$SYSROOT/usr/bin/xray"
+	[ ! -x "$CORE" ] || CURRENT="$CORE"
+	installed="$("$CURRENT" version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
+	if [ "$FORCE" -eq 0 ] && [ "$installed" = "$VERSION" ]; then
+		log "Xray $VERSION is already installed; no download needed."
+		exit 0
+	fi
+fi
 case "$(uname -m)" in
 	aarch64|arm64) ASSET=Xray-linux-arm64-v8a.zip ;;
 	x86_64|amd64) ASSET=Xray-linux-64.zip ;;
@@ -83,8 +102,11 @@ if ! command -v unzip >/dev/null 2>&1; then
 fi
 command -v sha256sum >/dev/null 2>&1 || die 'sha256sum is required.'
 . "$SYSROOT/usr/share/libubox/jshn.sh"
-mkdir -p "$(dirname "$LOCK")"
-mkdir "$LOCK" 2>/dev/null || die 'Another Krotex operation is running.'
+if [ -z "$PREPARE" ]; then
+	mkdir -p "$(dirname "$LOCK")"
+	mkdir "$LOCK" 2>/dev/null || die 'Another Krotex operation is running.'
+	LOCKED=1
+fi
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 umask 077
@@ -98,11 +120,20 @@ expected="$(awk -F'= ' '$1 == "SHA2-256" { print $2 }' "$WORK/core.dgst" | tr -d
 case "$expected" in *[!a-fA-F0-9]*) die 'Invalid release checksum.' ;; esac
 actual="$(sha256sum "$WORK/core.zip")"
 [ "${actual%% *}" = "$expected" ] || die 'Xray archive checksum mismatch.'
-mkdir -p "$(dirname "$CORE")"
-NEW="$(mktemp "$SYSROOT/usr/libexec/krotex/.xray-new.XXXXXX")"
+DESTINATION=${PREPARE:-$CORE}
+mkdir -p "$(dirname "$DESTINATION")"
+NEW="$(mktemp "$(dirname "$DESTINATION")/.xray-new.XXXXXX")"
 unzip -p "$WORK/core.zip" xray > "$NEW" || die 'Unable to extract Xray.'
 chmod 0755 "$NEW"
 "$NEW" version
+downloaded="$("$NEW" version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
+[ "$downloaded" = "$VERSION" ] || die 'The downloaded core version does not match the requested release.'
+if [ -n "$PREPARE" ]; then
+	[ ! -e "$PREPARE" ] || die 'The core preparation destination already exists.'
+	mv "$NEW" "$PREPARE"
+	NEW=
+	exit 0
+fi
 set -- run -test -config "$SYSROOT/etc/krotex/config.json"
 [ ! -r "$SYSROOT/usr/share/krotex/transparent.json" ] || set -- "$@" -config "$SYSROOT/usr/share/krotex/transparent.json"
 "$NEW" "$@" || die 'The new core rejected the current configuration.'
