@@ -58,6 +58,13 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         try {
           document.body.append(page.render(await page.load()));
           await pause();
+          const endpoint=document.querySelector('[aria-label="Configured VLESS server"]');
+          const change=document.querySelector('button[aria-label="Change VLESS connection"]');
+          check(endpoint.textContent==='proxy.example:443','saved server summary is missing');
+          check(!document.querySelector('textarea[aria-label="VLESS link"]'),'saved connection is not collapsed');
+          check(endpoint.parentElement===change.parentElement,'Change is not beside the saved endpoint');
+          check(endpoint.parentElement.getBoundingClientRect().height<70,'saved connection is not compact');
+          change.click();await pause();
           const input=document.querySelector('textarea[aria-label="VLESS link"]');
           check(input.value===link,'saved link is incomplete');
           check(input.scrollHeight<=input.clientHeight+2,'textbox clips saved link');
@@ -91,6 +98,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
           check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
           check(saved[2].profile.url===link,'section link was not retained');
+          check(!editor.cards.querySelector('textarea[aria-label="VLESS link"]'),'successful save did not collapse connections');
+          check(card(2).querySelector('[aria-label="Configured VLESS server"]').textContent==='proxy.example:443','newly saved connection summary is wrong');
           check(editor.saveButton.parentElement===editor.resetButton.parentElement,'Reset is not next to Save');
           const green=getComputedStyle(editor.saveButton).backgroundColor;
           check(green==='rgb(33, 135, 57)','save button is not green');

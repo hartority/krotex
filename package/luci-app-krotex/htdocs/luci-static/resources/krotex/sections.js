@@ -25,7 +25,9 @@ return baseclass.extend({
 		var disabled = !!busy || !!this.saving || !!this.testing || !!this.resetting || !available || !this.loaded || !L.hasViewPermission();
 		(this.controls || []).forEach(function(control) { control.disabled = disabled || !!control.krotexBoundary; });
 		if (this.saveButton) this.saveButton.disabled = disabled || !this.dirty;
-		if (this.resetButton) this.resetButton.disabled = disabled || !this.dirty;
+		if (this.resetButton) this.resetButton.disabled = disabled || (!this.dirty && !this.sections.some(function(section) {
+			return section.mode === 'proxy' && section.editingConnection && section.url;
+		}));
 	},
 
 	changed: function() {
@@ -39,10 +41,11 @@ return baseclass.extend({
 		return readSections().then(L.bind(function(data) {
 			if (data.code) throw new Error(data.message);
 			this.sections = (data.sections || []).map(function(section) {
+				var url = section.profile ? (section.profile.url || vless.format(section.profile)) : '';
 				return { id: section.id, name: section.name, mode: section.mode,
 					enabled: section.enabled, fallback: section.fallback,
 					domains: (section.domains || []).join('\n'),
-					url: section.profile ? (section.profile.url || vless.format(section.profile)) : '' };
+					url: url, editingConnection: !url };
 			});
 			this.loaded = true;
 			this.dirty = !!data.legacy;
@@ -61,7 +64,7 @@ return baseclass.extend({
 			return;
 		}
 		this.sections.push({ id: 'section-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
-			name: _('New section'), mode: 'unconfigured', enabled: false, fallback: false, domains: '', url: '' });
+			name: _('New section'), mode: 'unconfigured', enabled: false, fallback: false, domains: '', url: '', editingConnection: true });
 		this.changed();
 		this.renderCards();
 	},
@@ -153,13 +156,37 @@ return baseclass.extend({
 			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name ].concat(buttons, [remove])),
 				E('p', {}, [ mode, ' ', E('label', {}, [ enabled, ' ', _('Enabled') ]) ]) ];
 			if (section.mode === 'proxy') {
-				var warning = E('p', { 'role': 'status', 'class': 'cbi-value-description' }, '');
-				var link = E('textarea', { 'rows': 4, 'wrap': 'soft', 'class': 'cbi-input-text',
-					'style': 'width:100%;box-sizing:border-box;resize:vertical;overflow-wrap:anywhere',
-					'aria-label': _('VLESS link'), 'placeholder': 'vless://…', 'spellcheck': 'false', 'autocomplete': 'off',
-					'input': L.bind(function(event) { section.url = event.target.value; this.changed(); this.linkWarning(link, warning); }, this) });
-				link.value = section.url;
-				this.controls.push(link);
+				var endpoint;
+				try {
+					var profile = vless.inspect(section.url).profile;
+					endpoint = (profile.address.indexOf(':') >= 0 ? '[' + profile.address + ']' : profile.address) + ':' + profile.port;
+				}
+				catch (error) { section.editingConnection = true; }
+				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('VLESS connection')));
+				if (section.editingConnection) {
+					var warning = E('p', { 'role': 'status', 'class': 'cbi-value-description' }, '');
+					var link = E('textarea', { 'rows': 4, 'wrap': 'soft', 'class': 'cbi-input-text',
+						'style': 'width:100%;box-sizing:border-box;resize:vertical;overflow-wrap:anywhere',
+						'aria-label': _('VLESS link'), 'placeholder': 'vless://…', 'spellcheck': 'false', 'autocomplete': 'off',
+						'input': L.bind(function(event) { section.url = event.target.value; this.changed(); this.linkWarning(link, warning); }, this) });
+					link.value = section.url;
+					this.controls.push(link);
+					fields.push(link, warning);
+					this.linkWarning(link, warning);
+				}
+				else {
+					var change = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'aria-label': _('Change VLESS connection'),
+						'style': 'flex:0 0 auto;border-radius:6px',
+						'click': L.bind(function() {
+							section.editingConnection = true;
+							this.renderCards();
+						}, this) }, _('Change'));
+					this.controls.push(change);
+					fields.push(E('div', { 'style': 'display:flex;align-items:stretch;gap:.6em;margin:.5em 0' }, [
+						E('span', { 'aria-label': _('Configured VLESS server'),
+							'style': 'display:flex;align-items:center;flex:1;min-width:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;overflow-wrap:anywhere' }, endpoint), change
+					]));
+				}
 				var test = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(function() { return this.test(section); }, this) }, _('Check connection'));
 				var result = E('span', { 'role': 'status', 'aria-live': 'polite', 'aria-label': _('Connection check result'),
 					'style': 'flex:1;min-width:10em;overflow-wrap:anywhere' }, '');
@@ -167,9 +194,7 @@ return baseclass.extend({
 				var previous = this.checkResults[section.id];
 				if (previous) this.setCheckResult(section.id, previous.text, previous.error);
 				this.controls.push(test);
-				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('VLESS connection')), link, warning,
-					E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin:.5em 0 1em' }, [ test, result ]));
-				this.linkWarning(link, warning);
+				fields.push(E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin:.5em 0 1em' }, [ test, result ]));
 			}
 			if (section.mode !== 'unconfigured')
 				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains,

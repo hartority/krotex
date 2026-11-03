@@ -35,6 +35,8 @@ function chooseMode(editor,index,value){controls(editor,'Section route')[index].
 
 test('section editor restores the entire link, warnings and textbox height',async()=>{
   const {editor}=harness();await editor.load();
+  assert.equal(controls(editor,'VLESS link').length,0);
+  controls(editor,'Change VLESS connection')[0].attrs.click();
   const input=controls(editor,'VLESS link')[0];
   assert.equal(input.value,link);assert.equal(input.style.height,'322px');
   assert.equal(editor.sections[0].url,link);
@@ -55,6 +57,7 @@ test('section editor adds, orders and saves exclude/VPN1/VPN2 with one default',
 });
 test('section editor retains unsaved changes on rejection and blocks invalid links',async()=>{
   const state=harness(),editor=state.editor;await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
   editor.sections[0].url='invalid';editor.changed();await editor.save();
   assert.equal(state.saved.length,0);assert.match(editor.result.textContent,/VPN 1:/);
   editor.sections[0].url=link;state.code=1;await editor.save();
@@ -123,6 +126,7 @@ test('new sections remain unconfigured and inactive across saving and reopening'
 
 test('route selector and VLESS field stay consistent when changing types repeatedly',async()=>{
   const {editor}=harness();await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
   chooseMode(editor,0,'direct');
   assert.equal(controls(editor,'Section route')[0].value,'direct');
   assert.equal(controls(editor,'VLESS link').length,0);
@@ -134,4 +138,28 @@ test('route selector and VLESS field stay consistent when changing types repeate
   assert.equal(editor.sections[0].fallback,false);
   chooseMode(editor,0,'proxy');
   assert.equal(controls(editor,'VLESS link')[0].value,link);
+});
+
+test('opening connection editing changes no settings and Reset returns to the compact view',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
+  assert.equal(editor.dirty,false);assert.equal(state.saved.length,0);
+  assert.equal(editor.resetButton.disabled,false);
+  await editor.reset();
+  assert.equal(controls(editor,'VLESS link').length,0);
+  assert.equal(controls(editor,'Change VLESS connection').length,1);
+  assert.equal(state.saved.length,0);
+});
+
+test('failed saves retain the open VLESS editor; successful saves collapse it',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
+  const changed=link.replace('proxy.example:443','new.example:8443');
+  const input=controls(editor,'VLESS link')[0];input.value=changed;input.attrs.input({target:input});
+  state.code=1;await editor.save();
+  assert.equal(controls(editor,'VLESS link')[0].value,changed);
+  state.code=0;await editor.save();
+  assert.equal(controls(editor,'VLESS link').length,0);
+  assert.equal(editor.sections[0].url,changed);
+  assert.equal(state.saved[1][0].editingConnection,undefined);
 });
