@@ -78,14 +78,14 @@ action() {
 }
 
 case "$1" in
-	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{},"devices":{},"routing":{},"set_routing":{"mac":"str","enabled":"bool"},"set_routing_mode":{"mode":"str"},"sections":{},"save_sections":{"sections":"str"},"save_settings":{"sections":"str","routing":"str"},"test_section":{"id":"str"}}' ;;
+	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{},"devices":{},"routing":{},"set_routing":{"mac":"str","enabled":"bool"},"set_routing_mode":{"mode":"str"},"sections":{},"connections":{},"test_profile":{"id":"str"},"save_sections":{"sections":"str"},"save_settings":{"sections":"str","routing":"str"},"test_section":{"id":"str"}}' ;;
 	call)
 		case "$2" in
 			status) status ;;
 			action) action ;;
 			connection|save_connection|test_connection) exec /usr/libexec/krotex/connection "$2" ;;
 			devices|routing|set_routing|set_routing_mode) exec /usr/libexec/krotex/routing "$2" ;;
-			sections|save_settings|save_sections|test_section) exec /usr/libexec/krotex/sections "$2" ;;
+			sections|connections|test_profile|save_settings|save_sections|test_section) exec /usr/libexec/krotex/sections "$2" ;;
 			*) exit 2 ;;
 		esac
 		;;

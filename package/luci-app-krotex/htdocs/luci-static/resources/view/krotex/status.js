@@ -4,6 +4,7 @@
 'require poll';
 'require ui';
 'require krotex.sections as sections';
+'require krotex.connections as connections';
 
 var callStatus = rpc.declare({
 	object: 'krotex',
@@ -215,6 +216,7 @@ return view.extend({
 		this.routingMac.disabled = !!this.busy || !this.routingLoaded || !available || !L.hasViewPermission();
 		this.deviceSelect.disabled = this.routingMac.disabled;
 		this.routingMode.disabled = this.routingMac.disabled;
+		if (this.connectionChecker) this.connectionChecker.setState(!!this.busy, available);
 		if (this.sectionsEditor) this.sectionsEditor.setState(!!this.busy || !this.routingLoaded, available);
 	},
 
@@ -237,6 +239,7 @@ return view.extend({
 	showTab: function(name, focus) {
 		if (!this.tabPanels[name]) return;
 		this.activeTab = name;
+		if (this.connectionChecker) this.connectionChecker.setVisible(name === 'overview');
 		Object.keys(this.tabPanels).forEach(L.bind(function(key) {
 			var selected = key === name;
 			this.tabPanels[key].style.display = selected ? '' : 'none';
@@ -332,7 +335,10 @@ return view.extend({
 		}, rows);
 		this.pageHeader = E('div', { 'style': 'margin-bottom:.75em' }, [ E('h3', { 'style': 'margin:0' }, _('Service overview')) ]);
 
+		this.connectionChecker = connections.create({ onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this) });
+		var connectionsPanel = this.connectionChecker.render();
 		this.sectionsEditor = sections.create({
+			onLoaded: L.bind(function() { this.connectionChecker.load(); }, this),
 			externalActions: true,
 			hasPendingChanges: L.bind(function() { return !!this.routingDirty; }, this),
 			onSave: L.bind(this.handleSettingsSave, this),
@@ -342,7 +348,7 @@ return view.extend({
 		});
 		this.sectionsEditor.render();
 		this.tabPanels = {
-			overview: E('section', { 'id': 'krotex-overview', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-overview' }, [ this.pageHeader, this.statsPanel ]),
+			overview: E('section', { 'id': 'krotex-overview', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-overview' }, [ this.pageHeader, this.statsPanel, connectionsPanel ]),
 			default: E('section', { 'id': 'krotex-default', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-default' }, [
 				this.sectionsEditor.generalPanel,
 				E('div', { 'class': 'cbi-section' }, [

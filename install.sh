@@ -128,6 +128,7 @@ for path in "$SOURCE/update-core.sh" "$CORE/krotex.init" "$CORE/config.json" \
 	"$LUCI/htdocs/luci-static/resources/view/krotex/status.js" \
 	"$LUCI/htdocs/luci-static/resources/krotex/vless.js" \
 	"$LUCI/htdocs/luci-static/resources/krotex/sections.js" \
+	"$LUCI/htdocs/luci-static/resources/krotex/connections.js" \
 	"$LUCI/root/usr/libexec/krotex/connection" \
 	"$LUCI/root/usr/libexec/krotex/routing" \
 	"$LUCI/root/usr/libexec/krotex/sections" \
@@ -208,6 +209,7 @@ usr/share/rpcd/acl.d/luci-app-krotex.json
 www/luci-static/resources/view/krotex/status.js
 www/luci-static/resources/krotex/vless.js
 www/luci-static/resources/krotex/sections.js
+www/luci-static/resources/krotex/connections.js
 etc/krotex/config.json
 etc/krotex/routing.json
 etc/krotex/source-version
@@ -258,6 +260,7 @@ copy_file "$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json" "$SYSROOT/usr/s
 copy_file "$LUCI/htdocs/luci-static/resources/view/krotex/status.js" "$SYSROOT/www/luci-static/resources/view/krotex/status.js" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/vless.js" "$SYSROOT/www/luci-static/resources/krotex/vless.js" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/sections.js" "$SYSROOT/www/luci-static/resources/krotex/sections.js" 0644
+copy_file "$LUCI/htdocs/luci-static/resources/krotex/connections.js" "$SYSROOT/www/luci-static/resources/krotex/connections.js" 0644
 if [ ! -f "$SYSROOT/etc/krotex/config.json" ]; then
 	copy_file "$CORE/config.json" "$SYSROOT/etc/krotex/config.json" 0600
 fi

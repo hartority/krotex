@@ -199,6 +199,33 @@ try {
 	check(type(config) == 'object', 'Unable to read the Xray configuration.');
 	if (ARGV[0] == 'read')
 		printf('%J\n', { sections: current_sections(config), legacy: config.krotex_sections == null });
+	else if (ARGV[0] == 'connections') {
+		let entries = [], groups = {};
+		for (let section in current_sections(config)) {
+			if ((section.mode != 'proxy' && section.mode != 'proxy_devices') || !section.profile) continue;
+			let profile = proxy_profile(section.profile);
+			delete profile.url;
+			profile.id = lc(profile.id); profile.address = lc(profile.address); profile.server_name = lc(profile.server_name);
+			let key = sprintf('%J', profile);
+			if (!groups[key]) {
+				groups[key] = { id: section.id, endpoint: (index(profile.address, ':') >= 0 ? '[' + profile.address + ']' : profile.address) + ':' + profile.port, sections: [] };
+				push(entries, groups[key]);
+			}
+			push(groups[key].sections, section.name);
+		}
+		printf('%J\n', { connections: entries });
+	}
+	else if (ARGV[0] == 'probe') {
+		let request = json(readfile(ARGV[2], 262145)), found = false;
+		for (let section in current_sections(config)) {
+			if (section.id != request.id || (section.mode != 'proxy' && section.mode != 'proxy_devices') || !section.profile) continue;
+			printf('%J\n', { log: { loglevel: 'warning' },
+				inbounds: [{ tag: 'probe', listen: '127.0.0.1', port: 11180, protocol: 'socks', settings: { auth: 'noauth', udp: false } }],
+				outbounds: [outbound(proxy_profile(section.profile), 'proxy')] });
+			found = true; break;
+		}
+		check(found, 'Save a valid Xray connection before checking it.');
+	}
 	else if (ARGV[0] == 'devices') {
 		let routes = [];
 		for (let index, section in normalize(config.krotex_sections || []))

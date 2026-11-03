@@ -168,3 +168,29 @@ test('device VPNs have isolated transparent and DNS routes independent of common
     } finally {rmSync(work,{recursive:true,force:true});}
   }
 });
+
+
+test('overview deduplicates runtime profiles and probes inactive saved connections in isolation', {skip:!runtime}, () => {
+  const first={...section('a','proxy'),profile:{...profile,url:'vless://one#A'}};
+  const duplicate={...section('b','proxy_devices'),enabled:false,macs:['02:11:22:33:44:55'],profile:{...profile,url:'vless://two#B'}};
+  const other={...section('c','proxy'),enabled:false,profile:{...profile,id:'22222222-2222-4333-8444-555555555555'}};
+  const config=run('compile',[first,duplicate,other]);
+  const list=run('connections',[],config).connections;
+  assert.equal(list.length,2);
+  assert.deepEqual(list[0].sections,['a','b']);assert.equal(list[0].endpoint,'proxy.example:443');
+  const work=mkdtempSync(join(tmpdir(),'krotex-probe-'));
+  try {
+    writeFileSync(join(work,'config.json'),JSON.stringify(config));
+    writeFileSync(join(work,'request.json'),JSON.stringify({id:'b'}));
+    const output=execFileSync(join(runtime,'lib/ld-musl-x86_64.so.1'),['--library-path',runtime+'/lib:'+runtime+'/usr/lib',
+      runtime+'/usr/bin/ucode','-L',runtime+'/usr/lib/ucode',compiler,'probe',join(work,'config.json'),join(work,'request.json')],{encoding:'utf8'});
+    const probe=JSON.parse(output);
+    assert.equal(probe.inbounds[0].port,11180);assert.equal(probe.inbounds[0].listen,'127.0.0.1');
+    assert.equal(probe.outbounds[0].settings.vnext[0].users[0].id,profile.id);
+    assert.equal(probe.krotex_sections,undefined);
+    if(process.env.XRAY_TEST_BINARY) {
+      writeFileSync(join(work,'probe.json'),output);
+      execFileSync(process.env.XRAY_TEST_BINARY,['run','-test','-config',join(work,'probe.json')],{stdio:'pipe'});
+    }
+  } finally {rmSync(work,{recursive:true,force:true});}
+});

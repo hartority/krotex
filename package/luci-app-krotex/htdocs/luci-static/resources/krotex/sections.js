@@ -60,6 +60,7 @@ return baseclass.extend({
 			this.dirty = this.legacyDirty;
 			this.checkResults = Object.create(null);
 			this.renderCards();
+			if (this.options.onLoaded) this.options.onLoaded();
 		}, this)).catch(L.bind(function(error) {
 			this.result.textContent = error.message || _('Unable to load sections.');
 			throw error;

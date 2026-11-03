@@ -14,6 +14,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
     const view = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'));
     const vless = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'));
     const sections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'));
+    const connections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/connections.js'));
     const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace;margin:6px;padding:4px}
       /* LuCI Bootstrap draws its own checkbox using pseudo-elements. */
       input[type=checkbox]::before,input[type=checkbox]::after{position:absolute;content:""}
@@ -46,6 +47,11 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
         if(spec.method==='status') return {available:true,installed:true,running:true,enabled:autostart,krotex_version:'0.8.1'};
+        if(spec.method==='connections') {
+          const proxies=saved.filter(section=>section.profile);
+          return {connections:proxies.length?[{id:proxies[0].id,endpoint:'proxy.example:443',sections:proxies.map(section=>section.name)}]:[]};
+        }
+        if(spec.method==='test_profile') return {code:0,ip:'203.0.113.20',latency_ms:83};
         if(spec.method==='sections') return {sections:saved};
         if(spec.method==='save_settings') {
           saveCalls++;
@@ -61,6 +67,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         return {code:0};
       }};
       const sections = new ((function(){${sections}\n})())();
+      const connections = new ((function(){${connections}\n})())();
       const view = { extend: value=>value };
       const page = (function(){${view}\n})();
       const pause = () => new Promise(resolve=>setTimeout(resolve,50));
@@ -71,6 +78,9 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           await pause();
           check(page.activeTab==='overview'&&getComputedStyle(page.tabPanels.default).display==='none'&&getComputedStyle(page.tabPanels.devices).display==='none','Overview is not the initial tab');
           check(page.fields.krotex_version.textContent==='0.8.1','installed Krotex version is missing');
+          check(page.connectionChecker.list.children.length===1,'overview connection list is missing');
+          check(page.connectionChecker.list.textContent.includes('proxy.example:443')&&page.connectionChecker.list.textContent.includes('Working. Exit IP: 203.0.113.20'),'overview did not automatically check its connection');
+          check(page.connectionChecker.list.textContent.includes('Latency: 83 ms'),'overview omitted the measured latency');
           page.tabButtons.default.click();await pause();
           check(page.activeTab==='default'&&getComputedStyle(page.tabPanels.overview).display==='none','Default routing did not open');
           check(!document.body.textContent.includes('nullnull'),'null children are rendered below the sections');

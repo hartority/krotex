@@ -3,12 +3,12 @@
     "description": "Read Krotex status and control its service",
     "read": {
       "ubus": {
-        "krotex": ["status", "connection", "devices", "routing", "sections"]
+        "krotex": ["status", "connection", "devices", "routing", "sections", "connections"]
       }
     },
     "write": {
       "ubus": {
-        "krotex": ["action", "save_connection", "test_connection", "set_routing", "set_routing_mode", "save_sections", "save_settings", "test_section"]
+        "krotex": ["action", "save_connection", "test_connection", "set_routing", "set_routing_mode", "save_sections", "save_settings", "test_section", "test_profile"]
       }
     }
   }

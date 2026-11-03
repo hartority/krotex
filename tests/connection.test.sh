@@ -23,6 +23,7 @@ exec "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/us
 EOF
 cat > "$WORK/bin/sleep" <<'EOF'
 #!/bin/sh
+[ ! -f "$TEST_ROOT/probe-delay" ] || exec /bin/sleep "$@"
 exit 0
 EOF
 cat > "$WORK/bin/ubus" <<'EOF'
@@ -55,10 +56,12 @@ cat > "$TEST_ROOT/xray" <<'EOF'
 #!/bin/sh
 [ "${0##*/}" != private-xray ] || touch "$TEST_ROOT/private-core-used"
 test ! -f "$TEST_ROOT/reject-config" || exit 1
-cp "$4" "$TEST_ROOT/generated.json"
+if [ "$2" = -config ]; then echo $$ > "$TEST_ROOT/probe-pid"; cp "$3" "$TEST_ROOT/generated.json"
+else cp "$4" "$TEST_ROOT/generated.json"; fi
 if [ -n "${XRAY_TEST_BINARY:-}" ]; then
   exec "$XRAY_TEST_BINARY" "$@"
 fi
+[ "$2" != -config ] || exec /bin/sleep 60
 EOF
 cat > "$TEST_ROOT/etc/init.d/krotex" <<'EOF'
 #!/bin/sh
@@ -601,3 +604,28 @@ settings_request
 call_sections save_settings; expect_code 1
 cmp "$WORK/device-saved" "$TEST_ROOT/etc/krotex/config.json"
 echo 'PASS: unified settings persists device VPNs, supports their connection checks and rejects an invalid general default'
+
+
+sections="[{\"id\":\"inactive\",\"name\":\"Inactive VPN\",\"mode\":\"proxy\",\"enabled\":false,\"fallback\":false,\"domains\":[],\"profile\":$profile}]"
+settings_request
+call_sections save_settings; expect_code 0
+cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/probe-previous"
+rm -f "$TEST_ROOT/running"
+call_sections connections
+json_load "$(cat "$WORK/result")"; json_select connections; json_select 1; json_get_var id id
+test "$id" = inactive
+printf '{"id":"inactive"}\n' > "$WORK/request"
+touch "$TEST_ROOT/probe-delay"
+call_sections test_profile; expect_code 0
+grep -q 'socks5h://127.0.0.1:11180' "$TEST_ROOT/curl-args"
+test ! -f "$TEST_ROOT/running"
+cmp "$WORK/probe-previous" "$TEST_ROOT/etc/krotex/config.json"
+! kill -0 "$(cat "$TEST_ROOT/probe-pid")" 2>/dev/null
+touch "$TEST_ROOT/fail-request"
+call_sections test_profile; expect_code 1
+! kill -0 "$(cat "$TEST_ROOT/probe-pid")" 2>/dev/null
+rm "$TEST_ROOT/fail-request" "$TEST_ROOT/probe-delay"
+cmp "$WORK/probe-previous" "$TEST_ROOT/etc/krotex/config.json"
+printf '{"id":"missing"}\n' > "$WORK/request"
+call_sections test_profile; expect_code 1
+echo 'PASS: inactive connection checks work with the service stopped, preserve configuration and clean up temporary Xray on success and failure'

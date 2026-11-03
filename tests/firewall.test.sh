@@ -469,6 +469,16 @@ for client in "$LAN" "$OTHER"; do
 	test "$code" = 200
 done
 echo 'PASS: UDP/443 is blocked for common and dedicated VPN devices while HTTPS over TCP/443 works'
+printf '{"id":"tv"}\n' > "$WORK/profile-probe-request"
+ucode package/krotex/files/sections.uc probe "$WORK/core-config.json" "$WORK/profile-probe-request" > "$WORK/profile-probe.json"
+python3 tests/sections-traffic.py "$WORK" trust "$WORK/profile-probe.json"
+"$XRAY_TEST_BINARY" run -config "$WORK/profile-probe.json" > "$WORK/profile-probe.log" 2>&1 &
+PIDS="$PIDS $!"
+sleep 1
+code="$(curl --silent --show-error --noproxy '' --proxy socks5h://127.0.0.1:11180 --max-time 6 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+test "$code" = 403
+echo 'PASS: the isolated overview probe carries requests through the selected real TLS/VLESS server'
+
 
 
 for number in 1 2; do
@@ -546,3 +556,8 @@ if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 --resolve 'bl
 	echo 'FAIL: device VPN bypassed its failed server' >&2; exit 1
 fi
 echo 'PASS: an unavailable device VPN server does not fall back to direct traffic'
+
+if curl --silent --noproxy '' --proxy socks5h://127.0.0.1:11180 --max-time 3 -o /dev/null http://93.184.216.34:8080/; then
+	echo 'FAIL: isolated profile check bypassed the failed VPN server' >&2; exit 1
+fi
+echo 'PASS: the isolated overview probe reports a failed VPN without direct fallback'

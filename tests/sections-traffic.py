@@ -11,13 +11,14 @@ if len(sys.argv) > 2 and sys.argv[2] == "trust":
     # keep certificate verification enabled and leave host trust stores alone.
     cert = ssl.PEM_cert_to_DER_cert((work / "server.crt").read_text())
     pin = hashlib.sha256(cert).hexdigest()
-    config = json.loads((work / "sections-client.json").read_text())
+    target = Path(sys.argv[3]) if len(sys.argv) > 3 else work / "sections-client.json"
+    config = json.loads(target.read_text())
     for outbound in config["outbounds"]:
         tls = outbound.get("streamSettings", {}).get("tlsSettings")
         if tls is not None:
             tls["pinnedPeerCertSha256"] = pin
     config["log"]["loglevel"] = "debug"
-    (work / "sections-client.json").write_text(json.dumps(config))
+    target.write_text(json.dumps(config))
     sys.exit(0)
 uuid = "11111111-2222-4333-8444-555555555555"
 profiles = []

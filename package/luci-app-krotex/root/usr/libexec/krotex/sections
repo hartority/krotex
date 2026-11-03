@@ -14,6 +14,7 @@ WORK=
 LOCKED=0
 CHANGED=0
 WAS_RUNNING=0
+PROBE_PID=
 
 reply() {
 	json_init
@@ -23,6 +24,10 @@ reply() {
 }
 fail() { reply 1 "$1"; exit 0; }
 cleanup() {
+	if [ -n "$PROBE_PID" ]; then
+		kill "$PROBE_PID" 2>/dev/null || :
+		wait "$PROBE_PID" 2>/dev/null || :
+	fi
 	if [ "$CHANGED" -eq 1 ]; then
 		"$INIT" stop >/dev/null 2>&1
 		recovered=1
@@ -43,27 +48,37 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-if [ "$1" = sections ]; then
-	ucode "$COMPILER" read "$CONFIG" || reply 1 'Unable to read sections.'
+if [ "$1" = sections ] || [ "$1" = connections ]; then
+	operation=read; [ "$1" != connections ] || operation=connections
+	ucode "$COMPILER" "$operation" "$CONFIG" || reply 1 'Unable to read sections.'
 	exit 0
 fi
-case "$1" in save_settings|save_sections|test_section) ;; *) exit 2 ;; esac
+case "$1" in save_settings|save_sections|test_section|test_profile) ;; *) exit 2 ;; esac
 mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
 LOCKED=1
 umask 077
 WORK="$(mktemp -d /etc/krotex/.sections.XXXXXX)" || fail 'Unable to create temporary files.'
 head -c 262145 > "$WORK/request.json"
 [ "$(wc -c < "$WORK/request.json")" -le 262144 ] || fail 'Section settings are too large.'
-if [ "$1" = test_section ]; then
-	services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || fail 'Unable to query procd.'
-	json_load "$services" && json_select krotex && json_select instances && json_select main || fail 'Start Krotex before checking a section.'
-	json_get_var active running
-	[ "$active" = 1 ] || fail 'Start Krotex before checking a section.'
-	ucode "$COMPILER" check "$CONFIG" "$WORK/request.json" > "$WORK/check.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
-	json_load "$(cat "$WORK/check.json")" || fail 'Invalid connection check.'
-	json_get_var port port
-	case "$port" in ''|*[!0-9]*) fail 'Invalid connection check.' ;; esac
-	[ "$port" -ge 11080 ] && [ "$port" -le 11111 ] || fail 'Invalid connection check.'
+if [ "$1" = test_section ] || [ "$1" = test_profile ]; then
+	if [ "$1" = test_profile ]; then
+		ucode "$COMPILER" probe "$CONFIG" "$WORK/request.json" > "$WORK/probe.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+		"$PROG" run -config "$WORK/probe.json" > "$WORK/probe.log" 2>&1 &
+		PROBE_PID=$!
+		sleep 1
+		kill -0 "$PROBE_PID" 2>/dev/null || fail 'Unable to start the isolated connection check. The local check port may be in use.'
+		port=11180
+	else
+		services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || fail 'Unable to query procd.'
+		json_load "$services" && json_select krotex && json_select instances && json_select main || fail 'Start Krotex before checking a section.'
+		json_get_var active running
+		[ "$active" = 1 ] || fail 'Start Krotex before checking a section.'
+		ucode "$COMPILER" check "$CONFIG" "$WORK/request.json" > "$WORK/check.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+		json_load "$(cat "$WORK/check.json")" || fail 'Invalid connection check.'
+		json_get_var port port
+		case "$port" in ''|*[!0-9]*) fail 'Invalid connection check.' ;; esac
+		[ "$port" -ge 11080 ] && [ "$port" -le 11111 ] || fail 'Invalid connection check.'
+	fi
 	elapsed="$(curl --silent --show-error --fail --noproxy '' --proxy "socks5h://127.0.0.1:$port" --connect-timeout 5 --max-time 12 --proto '=https' --output "$WORK/ip" --write-out '%{time_starttransfer}' https://api.ipify.org 2> "$WORK/error")" || fail "The HTTPS request through this section failed. $(head -c 512 "$WORK/error")"
 	result="$(cat "$WORK/ip")"
 	case "$result" in ''|*[!0-9a-fA-F:.]*) fail 'The IP check returned an unexpected response.' ;; esac

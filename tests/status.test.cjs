@@ -20,6 +20,7 @@ function harness(writable = true) {
     E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
       replaceChildren(...items) { this.children = items; }, setAttribute(key,value) { this.attrs[key]=value; } }),
     _: text => text,
+    connections: { create:()=>({render:()=>({}),setState:()=>{},setVisible:()=>{},load:async()=>{}}) },
     sections: { create: () => ({
       render: () => ({}), setState: () => {}, loaded:true, dirty:false,
       saveButton:{}, resetButton:{}, result:{textContent:''},
