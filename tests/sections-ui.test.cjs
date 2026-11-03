@@ -46,7 +46,7 @@ test('section editor adds, orders and saves exclude/VPN1/VPN2 with one default',
   const state=harness(),editor=state.editor;await editor.load();
   editor.add();chooseMode(editor,1,'direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com\n# comment\n';editor.move(1,-1);
   editor.add();chooseMode(editor,2,'proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';
-  controls(editor,'Use for unmatched traffic')[2].attrs.change({target:{checked:true}});
+  editor.fallbackSelect.value=editor.sections[2].id;editor.handleFallbackChange();
   assert.deepEqual(Array.from(editor.sections,s=>s.fallback),[false,false,true]);
   await editor.save();
   assert.deepEqual(state.saved[0].map(s=>s.name),['exclude','VPN 1','VPN 2']);
@@ -100,9 +100,35 @@ test('Reset discards section edits, additions and deletions without saving',asyn
 });
 test('disabled default is cleared; removal leaves the remaining section in place',async()=>{
   const {editor}=harness();await editor.load();
+  assert.equal(editor.fallbackSelect.value,'vpn1');
   controls(editor,'Enable section')[0].attrs.change({target:{checked:false}});
   assert.equal(editor.sections[0].enabled,false);assert.equal(editor.sections[0].fallback,false);
+  assert.equal(editor.fallbackSelect.value,'');
   editor.add();chooseMode(editor,1,'direct');editor.remove(0);assert.equal(editor.sections.length,1);assert.equal(editor.sections[0].mode,'direct');
+});
+
+test('one default-route selector tracks names, ordering, removal and Reset',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  assert.equal(editor.fallbackSelect.value,'vpn1');
+  editor.add();
+  assert.equal(editor.fallbackSelect.children.length,2,'unconfigured draft must not be an option');
+  chooseMode(editor,1,'direct');
+  assert.equal(editor.fallbackSelect.children.length,3);
+  editor.fallbackSelect.value=editor.sections[1].id;editor.handleFallbackChange();
+  assert.deepEqual(Array.from(editor.sections,s=>s.fallback),[false,true]);
+  controls(editor,'Section name')[1].attrs.input({target:{value:'exclude'}});
+  assert.match(editor.fallbackSelect.children[2].children,/exclude/);
+  const selected=editor.sections[1].id;editor.move(1,-1);
+  assert.equal(editor.fallbackSelect.value,selected);
+  editor.remove(0);
+  assert.equal(editor.fallbackSelect.value,'');
+  assert.equal(editor.sections[0].fallback,false);
+  await editor.reset();
+  assert.equal(editor.fallbackSelect.value,'vpn1');
+  editor.fallbackSelect.value='';editor.handleFallbackChange();
+  await editor.save();
+  assert.equal(state.saved[0][0].fallback,false);
+  assert.equal(editor.fallbackSelect.value,'');
 });
 test('read-only users can view sections but cannot edit or save them',async()=>{
   const state=harness(false),editor=state.editor;await editor.load();

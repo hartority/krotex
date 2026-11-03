@@ -104,14 +104,38 @@ return baseclass.extend({
 		this.fitLink(input);
 	},
 
+	refreshFallbackOptions: function() {
+		var selected = '';
+		var options = [ E('option', { 'value': '' }, _('Direct (without a section)')) ];
+		this.sections.forEach(function(section) {
+			if (!section.enabled || [ 'direct', 'proxy' ].indexOf(section.mode) < 0) return;
+			options.push(E('option', { 'value': section.id }, '%s · %s'.format(
+				section.name || _('Unnamed section'), section.mode === 'proxy' ? _('Xray') : _('Direct'))));
+			if (section.fallback) selected = section.id;
+		});
+		this.fallbackSelect.replaceChildren.apply(this.fallbackSelect, options);
+		this.fallbackSelect.value = selected;
+	},
+
+	handleFallbackChange: function() {
+		if (this.externalBusy || this.saving || this.testing || this.resetting || !L.hasViewPermission()) return;
+		var id = this.fallbackSelect.value;
+		if (id && !this.sections.some(function(section) {
+			return section.id === id && section.enabled && [ 'direct', 'proxy' ].indexOf(section.mode) >= 0;
+		})) { this.refreshFallbackOptions(); return; }
+		this.sections.forEach(function(section) { section.fallback = section.id === id; });
+		this.changed();
+	},
+
 	renderCards: function() {
 		this.controls = this.topControls.slice();
 		this.checkOutputs = Object.create(null);
+		this.refreshFallbackOptions();
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var actionRow;
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
 				'maxlength': 128, 'aria-label': _('Section name'), 'style': 'flex:1;min-width:0;width:auto',
-				'input': L.bind(function(event) { section.name = event.target.value; this.changed(); }, this) });
+				'input': L.bind(function(event) { section.name = event.target.value; this.changed(); this.refreshFallbackOptions(); }, this) });
 			var mode = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Section route'),
 				'change': L.bind(function(event) {
 					var wasUnconfigured = section.mode === 'unconfigured';
@@ -128,18 +152,6 @@ return baseclass.extend({
 				'change': L.bind(function(event) { section.enabled = event.target.checked; if (!section.enabled) section.fallback = false; this.changed(); this.renderCards(); }, this) });
 			enabled.checked = !!section.enabled;
 			enabled.krotexBoundary = section.mode === 'unconfigured';
-			var fallback = E('input', { 'type': 'checkbox', 'aria-label': _('Use for unmatched traffic'),
-				'change': L.bind(function(event) {
-					var checked = event.target.checked;
-					this.sections.forEach(function(item) { item.fallback = false; });
-					section.fallback = checked;
-					if (checked) section.enabled = true;
-					this.changed(); this.renderCards();
-				}, this) });
-			fallback.checked = !!section.fallback;
-			fallback.style.margin = '0';
-			fallback.style.flex = '0 0 auto';
-			fallback.krotexBoundary = section.mode === 'unconfigured';
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
@@ -153,7 +165,7 @@ return baseclass.extend({
 			}, this));
 			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'style': 'flex:0 0 auto', 'aria-label': _('Remove section'),
 				'click': L.bind(function() { this.remove(index); }, this) }, '×');
-			this.controls.push(name, mode, enabled, fallback, domains, remove);
+			this.controls.push(name, mode, enabled, domains, remove);
 			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name ].concat(buttons, [remove])),
 				E('p', {}, [ mode, ' ', E('label', {}, [ enabled, ' ', _('Enabled') ]) ]) ];
 			if (section.mode === 'proxy') {
@@ -200,10 +212,7 @@ return baseclass.extend({
 				}, [ test, result ]);
 			}
 			if (section.mode !== 'unconfigured')
-				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains,
-					E('div', { 'style': 'margin-top:.85em;padding:.25em 0' }, [
-						E('label', { 'style': 'display:inline-flex;align-items:center;gap:.45em;line-height:1.5' }, [ fallback, _('Use this section for all unmatched traffic') ])
-					]));
+				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains);
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
 			if (actionRow) fields.push(actionRow);
@@ -292,18 +301,23 @@ return baseclass.extend({
 		this.cards = E('div', {}, []);
 		this.result = E('p', { 'role': 'status', 'aria-live': 'polite' }, _('Loading sections…'));
 		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(this.add, this) }, _('Add section'));
+		this.fallbackSelect = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Unmatched traffic'),
+			'style': 'min-width:0;max-width:100%', 'change': L.bind(this.handleFallbackChange, this)
+		}, []);
 		this.saveButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-apply cbi-button-positive',
 			'style': 'background:#218739;border-color:#1c7532;color:#fff', 'click': L.bind(this.save, this) }, _('Save sections and apply'));
 		this.resetButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-reset', 'click': L.bind(this.reset, this) }, _('Reset'));
-		this.topControls = [ addSection, this.saveButton, this.resetButton ];
+		this.topControls = [ addSection, this.saveButton, this.resetButton, this.fallbackSelect ];
 		this.controls = this.topControls.slice();
 		this.setState(false, this.available);
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Routing sections')),
-			E('p', {}, _('Sections match domains from top to bottom. The first match wins. One section can handle all unmatched traffic; otherwise it goes directly.')),
+			E('p', {}, _('Sections match domains from top to bottom. The first match wins. Choose the route for all remaining traffic below.')),
 			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
-			E('div', {}, [ addSection ]), this.cards,
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [ addSection,
+				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ])
+			]), this.cards,
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
 		]);
 	}

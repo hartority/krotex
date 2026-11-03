@@ -78,7 +78,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(route(0).value==='direct'&&!card(0).querySelector('textarea[aria-label="VLESS link"]'),'type and VLESS field disagree');
           choose(0,'proxy');
           check(route(0).value==='proxy'&&card(0).querySelector('textarea[aria-label="VLESS link"]').value===link,'cannot switch back to Xray');
-          check(editor.topControls.length===3,'there must be add, save and reset buttons');
+          check(editor.topControls.length===4,'section controls must include one default route selector');
+          check(editor.fallbackSelect.value==='vpn1','saved default VPN was not restored');
           editor.topControls[0].click();
           check(route(1).value==='unconfigured'&&!editor.sections[1].enabled,'new section has a configured route');
           check(card(1).querySelector('input[aria-label="Enable section"]').disabled,'unconfigured section can be enabled');
@@ -92,8 +93,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           const remove=card(2).querySelector('button[aria-label="Remove section"]');
           check(nameInput.parentElement===remove.parentElement,'name and action buttons are on different rows');
           check(Math.abs(nameInput.getBoundingClientRect().y-remove.getBoundingClientRect().y)<12,'name and buttons do not line up');
-          const fallback=editor.cards.children[2].querySelector('input[aria-label="Use for unmatched traffic"]');
-          fallback.checked=true;fallback.dispatchEvent(new Event('change'));
+          editor.fallbackSelect.value=editor.sections[2].id;editor.fallbackSelect.dispatchEvent(new Event('change'));
           await editor.save();
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
           check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
@@ -120,11 +120,9 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           editor.add();check(editor.sections.length===4,'draft section was not added');
           editor.resetButton.click();await pause();
           check(editor.sections.length===3&&!editor.dirty,'Reset did not restore saved sections');
-          check(card(0).querySelector('input[aria-label="Use for unmatched traffic"]').checked===false,'false checkbox attribute enabled the direct default');
-          check(card(2).querySelector('input[aria-label="Use for unmatched traffic"]').checked===true,'default checkbox does not match the model');
-          const defaultLabel=card(2).querySelector('input[aria-label="Use for unmatched traffic"]').parentElement;
-          const domainBox=card(2).querySelector('textarea[aria-label="Domains"]');
-          check(defaultLabel.getBoundingClientRect().top-domainBox.getBoundingClientRect().bottom>=10,'default option lacks padding below domains');
+          check(!editor.cards.querySelector('input[aria-label="Use for unmatched traffic"]'),'per-section default checkbox remains');
+          check(editor.fallbackSelect.value===saved[2].id,'saved default VPN is not selected in the shared list');
+          check(editor.fallbackSelect.parentElement.parentElement===editor.topControls[0].parentElement,'default selector is not beside Add section');
           document.body.style.width='1000px';
           const heading=page.pageHeader.querySelector('h2').getBoundingClientRect();
           const actions=page.serviceActions.getBoundingClientRect();
