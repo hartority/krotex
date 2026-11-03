@@ -138,10 +138,10 @@ return baseclass.extend({
 	},
 
 	move: function(index, offset) {
-		var indices = [];
-		this.sections.forEach(function(section, i) { if (section.mode !== 'proxy_devices') indices.push(i); });
+		var indices = [], deviceVpn = this.sections[index] && this.sections[index].mode === 'proxy_devices';
+		this.sections.forEach(function(section, i) { if ((section.mode === 'proxy_devices') === deviceVpn) indices.push(i); });
 		var position = indices.indexOf(index), target = indices[position + offset];
-		if (position < 0 || target == null || this.externalBusy || this.saving) return;
+		if (position < 0 || target == null || this.externalBusy || this.saving || this.testing || this.resetting || !L.hasViewPermission()) return;
 		var item = this.sections[index]; this.sections[index] = this.sections[target]; this.sections[target] = item;
 		this.changed(); this.renderCards();
 	},
@@ -206,8 +206,8 @@ return baseclass.extend({
 		this.refreshFallbackOptions();
 		var linkAppearance = 'box-sizing:border-box;margin:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;font-size:inherit;line-height:1.5;overflow-wrap:anywhere';
 		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)', proxy_devices: 'rgba(64,158,255,.08)', block: 'rgba(217,48,37,.08)' };
-		var generalIndices = [];
-		this.sections.forEach(function(section, i) { if (section.mode !== 'proxy_devices') generalIndices.push(i); });
+		var generalIndices = [], deviceIndices = [];
+		this.sections.forEach(function(section, i) { (section.mode === 'proxy_devices' ? deviceIndices : generalIndices).push(i); });
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var actionRow, deviceVpn = section.mode === 'proxy_devices';
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
@@ -215,6 +215,7 @@ return baseclass.extend({
 				'input': L.bind(function(event) { section.name = event.target.value; this.changed(); this.refreshFallbackOptions(); }, this) });
 			var mode = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Section route'),
 				'change': L.bind(function(event) {
+					if (deviceVpn) { event.target.value = 'proxy'; return; }
 					var wasUnconfigured = section.mode === 'unconfigured';
 					section.mode = event.target.value;
 					if (section.mode === 'unconfigured') { section.enabled = false; section.fallback = false; }
@@ -224,7 +225,8 @@ return baseclass.extend({
 			}, [ E('option', { 'value': 'unconfigured' }, _('Not configured')),
 				E('option', { 'value': 'direct' }, _('Direct')), E('option', { 'value': 'proxy' }, _('Xray')), E('option', { 'value': 'block' }, _('Block')) ]);
 			// LuCI sets attributes verbatim: selected="false" is still selected.
-			mode.value = section.mode;
+			mode.value = deviceVpn ? 'proxy' : section.mode;
+			mode.krotexBoundary = deviceVpn;
 			// Keep the native checkbox accessible, but hide theme-drawn pseudo-elements too.
 			var track = E('span', { 'aria-hidden': 'true',
 				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:4px;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
@@ -243,19 +245,20 @@ return baseclass.extend({
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
 			domains.value = section.domains;
-			var buttons = (deviceVpn ? [] : [ [ '↑', -1 ], [ '↓', 1 ] ]).map(L.bind(function(item) {
+			var indices = deviceVpn ? deviceIndices : generalIndices;
+			var buttons = [ [ '↑', -1 ], [ '↓', 1 ] ].map(L.bind(function(item) {
 				var button = E('button', { 'type': 'button', 'class': 'btn', 'style': 'flex:0 0 auto', 'aria-label': item[1] < 0 ? _('Move section up') : _('Move section down'),
 					'click': L.bind(function() { this.move(index, item[1]); }, this) }, item[0]);
-				button.krotexBoundary = generalIndices.indexOf(index) + item[1] < 0 || generalIndices.indexOf(index) + item[1] >= generalIndices.length;
+				button.krotexBoundary = indices.indexOf(index) + item[1] < 0 || indices.indexOf(index) + item[1] >= indices.length;
 				this.controls.push(button);
 				return button;
 			}, this));
 			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'style': 'flex:0 0 auto', 'aria-label': _('Remove section'),
 				'click': L.bind(function() { this.remove(index); }, this) }, '×');
-			this.controls.push(name, enabled, remove);
-			if (!deviceVpn) this.controls.push(mode, domains);
+			this.controls.push(name, mode, enabled, remove);
+			if (!deviceVpn) this.controls.push(domains);
 			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name, enabledSwitch ].concat(buttons, [remove])) ];
-			if (!deviceVpn) fields.push(E('p', {}, mode));
+			fields.push(E('p', {}, mode));
 			if (section.mode === 'proxy' || deviceVpn) {
 				var endpoint;
 				try {

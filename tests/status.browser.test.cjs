@@ -265,8 +265,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           page.tabButtons.devices.click();await pause();
           editor.topControls[4].click();await pause();
           let deviceCard=editor.deviceCards.children[0];
-          check(!deviceCard.querySelector('[aria-label="Section route"]')&&!deviceCard.querySelector('[aria-label="Domains"]'),'device VPN contains general routing controls');
-          check(!deviceCard.querySelector('[aria-label="Move section up"]'),'device VPN contains ordering arrows');
+          check(deviceCard.querySelector('[aria-label="Section route"]').value==='proxy'&&deviceCard.querySelector('[aria-label="Section route"]').disabled&&!deviceCard.querySelector('[aria-label="Domains"]'),'device VPN must show a disabled Xray selector and device settings');
+          check(deviceCard.querySelector('[aria-label="Move section up"]')&&deviceCard.querySelector('[aria-label="Move section down"]'),'device VPN is missing shared ordering buttons');
           const deviceLink=deviceCard.querySelector('[aria-label="VLESS link"]');
           deviceLink.value=link;deviceLink.dispatchEvent(new Event('input'));
           const picker=deviceCard.querySelector('[aria-label="Device VPN device"]');

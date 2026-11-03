@@ -260,8 +260,11 @@ test('device VPN cards are separate, persist assigned devices and never become a
   editor.addDeviceVpn();const device=editor.sections[1];device.url=link;
   editor.assignDevice(device,'02:11:22:33:44:55');
   assert.equal(editor.deviceCards.children.length,1);assert.equal(editor.cards.children.length,1);
-  assert.equal(controls(editor,'Move section up').length,1);
-  assert.equal(controls(editor,'Section route').length,1);
+  assert.equal(controls(editor,'Move section up').length,2);
+  assert.equal(controls(editor,'Section route').length,2);
+  assert.equal(controls(editor,'Section route')[1].value,'proxy');
+  assert.equal(controls(editor,'Section route')[1].disabled,true);
+  chooseMode(editor,1,'block');assert.equal(device.mode,'proxy_devices');
   assert.equal(controls(editor,'Domains').length,1);
   assert.equal(editor.fallbackSelect.children.length,2);
   await editor.save();
@@ -277,9 +280,24 @@ test('device VPN cards are separate, persist assigned devices and never become a
 
 test('general ordering skips device VPN cards and cancellation preserves device changes',async()=>{
   const {editor}=harness();await editor.load();editor.addDeviceVpn();editor.sections[1].url=link;
-  editor.add();chooseMode(editor,1,'direct');
+  editor.add();chooseMode(editor,2,'direct');
   const device=editor.sections[1];editor.move(2,-1);
   assert.equal(editor.sections[0].mode,'direct');assert.equal(editor.sections[1],device);
   assert.equal(editor.sections[2].mode,'proxy');
   editor.move(1,-1);assert.equal(editor.sections[1],device);
+});
+
+
+test('device VPN ordering stays within its own group and survives saving',async()=>{
+  const {editor}=harness();await editor.load();
+  editor.addDeviceVpn();editor.sections[1].url=link;editor.sections[1].macs=['02:11:22:33:44:55'];
+  editor.add();chooseMode(editor,2,'direct');const general=editor.sections[2];
+  editor.addDeviceVpn();editor.sections[3].url=link;editor.sections[3].macs=['02:aa:bb:cc:dd:ee'];
+  const first=editor.sections[1],second=editor.sections[3];
+  editor.move(3,-1);
+  assert.equal(editor.sections[1],second);assert.equal(editor.sections[2],general);assert.equal(editor.sections[3],first);
+  assert.equal(editor.fallbackSelect.value,'vpn1');
+  await editor.save();
+  assert.equal(editor.sections[1].id,second.id);assert.equal(editor.sections[3].id,first.id);
+  assert.ok(controls(editor,'Section route').filter(c=>c.krotexBoundary).every(c=>c.disabled&&c.value==='proxy'));
 });
