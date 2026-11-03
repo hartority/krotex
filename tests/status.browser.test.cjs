@@ -13,7 +13,12 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
     const view = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'), 'utf8');
     const vless = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'), 'utf8');
     const sections = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'), 'utf8');
-    const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace}</style><script>
+    const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace}
+      /* LuCI Bootstrap draws its own checkbox using pseudo-elements. */
+      input[type=checkbox]::before,input[type=checkbox]::after{position:absolute;content:""}
+      input[type=checkbox]::before{top:0;left:0;width:14px;height:14px;background:#555;border:1px solid #888}
+      input[type=checkbox]:checked::after{top:2px;left:2px;width:10px;height:10px;background:#ddd}
+      </style><script>
       const _ = value => value;
       String.prototype.format = function(...args) { let i=0; return this.replace(/%s|%\\.1f/g, () => String(args[i++])); };
       const E = (tag, attrs, children) => {
@@ -69,7 +74,14 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(input.value===link,'saved link is incomplete');
           check(input.scrollHeight<=input.clientHeight+2,'textbox clips saved link');
           check(input.clientHeight>500,'long link was not expanded');
+          const cancel=document.querySelector('[aria-label="Cancel VLESS editing"]');
+          check(cancel,'VLESS editing has no Cancel button');
+          input.value='invalid';input.dispatchEvent(new Event('input'));
+          cancel.click();
           const editor=page.sectionsEditor;
+          check(!editor.dirty&&!document.querySelector('textarea[aria-label="VLESS link"]'),'Cancel did not restore and collapse the saved link');
+          check(editor.sections[0].url===link,'Cancel retained the edited link');
+          document.querySelector('[aria-label="Change VLESS connection"]').click();
           const card=(index)=>editor.cards.children[index];
           const route=(index)=>card(index).querySelector('select[aria-label="Section route"]');
           const choose=(index,value)=>{route(index).value=value;route(index).dispatchEvent(new Event('change'));};
@@ -95,6 +107,11 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(nameInput.parentElement===remove.parentElement,'name and action buttons are on different rows');
           check(enabled.parentElement.parentElement===nameInput.parentElement,'Enabled is not in the section header');
           check(enabled.getAttribute('role')==='switch','Enabled is not a switch');
+          check(getComputedStyle(enabled,'::before').content==='""','theme checkbox reproduction is missing');
+          check(getComputedStyle(enabled).opacity==='0','theme checkbox remains visible over the switch');
+          enabled.focus();
+          check(getComputedStyle(enabled.nextElementSibling).outlineStyle==='solid','switch lacks a visible keyboard focus indicator');
+          enabled.blur();
           const up=card(2).querySelector('button[aria-label="Move section up"]');
           check(nameInput.getBoundingClientRect().right<=enabled.getBoundingClientRect().left&&enabled.getBoundingClientRect().right<=up.getBoundingClientRect().left,'Enabled is not between the name and arrows');
           check(Math.abs(nameInput.getBoundingClientRect().y-remove.getBoundingClientRect().y)<12,'name and buttons do not line up');

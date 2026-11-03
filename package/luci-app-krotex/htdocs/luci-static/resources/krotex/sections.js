@@ -30,6 +30,12 @@ return baseclass.extend({
 		}));
 	},
 
+	draftState: function() {
+		return JSON.stringify(this.sections.map(function(section) {
+			return [ section.id, section.name, section.mode, section.enabled, section.fallback, section.domains, section.url ];
+		}));
+	},
+
 	changed: function() {
 		this.dirty = true;
 		this.checkResults = Object.create(null);
@@ -48,7 +54,9 @@ return baseclass.extend({
 					url: url, editingConnection: !url };
 			});
 			this.loaded = true;
-			this.dirty = !!data.legacy;
+			this.legacyDirty = !!data.legacy;
+			this.savedState = this.draftState();
+			this.dirty = this.legacyDirty;
 			this.checkResults = Object.create(null);
 			this.renderCards();
 		}, this)).catch(L.bind(function(error) {
@@ -148,16 +156,20 @@ return baseclass.extend({
 				E('option', { 'value': 'direct' }, _('Direct')), E('option', { 'value': 'proxy' }, _('Xray')) ]);
 			// LuCI sets attributes verbatim: selected="false" is still selected.
 			mode.value = section.mode;
+			// Keep the native checkbox accessible, but hide theme-drawn pseudo-elements too.
+			var track = E('span', { 'aria-hidden': 'true',
+				'style': 'display:block;position:relative;box-sizing:border-box;width:100%;height:100%;border:1px solid #8886;border-radius:1em;pointer-events:none;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)')
+			}, E('span', { 'style': 'position:absolute;top:50%;transform:translateY(-50%);left:' + (section.enabled ? 'calc(100% - .9em)' : '.15em') + ';width:.75em;height:.75em;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004' }));
 			var enabled = E('input', { 'type': 'checkbox', 'role': 'switch', 'aria-label': _('Enable section'),
-				'style': 'appearance:none;-webkit-appearance:none;display:block;width:2em;height:1.15em;margin:0;border:1px solid #8886;border-radius:1em;cursor:pointer;background:' + (section.enabled ? '#218739' : 'rgba(127,127,127,.2)'),
+				'style': 'position:absolute;inset:0;display:block;box-sizing:border-box;width:100%;height:100%;margin:0;padding:0;opacity:0;z-index:1;cursor:pointer',
+				'focus': function() { track.style.outline = '2px solid #52a8ec'; track.style.outlineOffset = '2px'; },
+				'blur': function() { track.style.outline = ''; track.style.outlineOffset = ''; },
 				'change': L.bind(function(event) { section.enabled = event.target.checked; if (!section.enabled) section.fallback = false; this.changed(); this.renderCards(); }, this) });
 			enabled.checked = !!section.enabled;
 			enabled.krotexBoundary = section.mode === 'unconfigured';
 			var enabledSwitch = E('label', { 'title': section.enabled ? _('Enabled') : _('Disabled'),
-				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;margin:0'
-			}, [ enabled, E('span', { 'aria-hidden': 'true',
-				'style': 'position:absolute;pointer-events:none;top:50%;transform:translateY(-50%);left:' + (section.enabled ? 'calc(100% - .9em)' : '.15em') + ';width:.75em;height:.75em;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004'
-			}) ]);
+				'style': 'display:inline-flex;align-items:center;position:relative;flex:0 0 auto;width:2em;height:1.15em;margin:0'
+			}, [ enabled, track ]);
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
@@ -191,12 +203,25 @@ return baseclass.extend({
 					link.value = section.url;
 					this.controls.push(link);
 					fields.push(link, warning);
+					if (section.connectionBeforeEdit != null) {
+						var cancel = E('button', { 'type': 'button', 'class': 'btn', 'aria-label': _('Cancel VLESS editing'),
+							'click': L.bind(function() {
+								section.url = section.connectionBeforeEdit;
+								delete section.connectionBeforeEdit;
+								section.editingConnection = false;
+								this.dirty = this.legacyDirty || this.draftState() !== this.savedState;
+								this.renderCards();
+							}, this) }, _('Cancel'));
+						this.controls.push(cancel);
+						fields.push(cancel);
+					}
 					this.linkWarning(link, warning);
 				}
 				else {
 					var change = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'aria-label': _('Change VLESS connection'),
 						'style': 'flex:0 0 auto;border-radius:6px',
 						'click': L.bind(function() {
+							section.connectionBeforeEdit = section.url;
 							section.editingConnection = true;
 							this.renderCards();
 						}, this) }, _('Change'));

@@ -189,3 +189,36 @@ test('failed saves retain the open VLESS editor; successful saves collapse it',a
   assert.equal(editor.sections[0].url,changed);
   assert.equal(state.saved[1][0].editingConnection,undefined);
 });
+
+
+test('Cancel closes VLESS editing without saving and restores only the link',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
+  assert.equal(editor.dirty,false);
+  controls(editor,'Cancel VLESS editing')[0].attrs.click();
+  assert.equal(controls(editor,'VLESS link').length,0);
+  assert.equal(editor.dirty,false);
+  controls(editor,'Change VLESS connection')[0].attrs.click();
+  controls(editor,'VLESS link')[0].attrs.input({target:{value:'invalid'}});
+  controls(editor,'Section name')[0].attrs.input({target:{value:'Renamed VPN'}});
+  controls(editor,'Cancel VLESS editing')[0].attrs.click();
+  assert.equal(editor.sections[0].url,link);
+  assert.equal(editor.sections[0].name,'Renamed VPN');
+  assert.equal(editor.dirty,true);
+  assert.equal(controls(editor,'VLESS link').length,0);
+  assert.equal(state.saved.length,0);
+});
+
+test('Cancel discards link-only edits and respects read-only state',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  controls(editor,'Change VLESS connection')[0].attrs.click();
+  controls(editor,'VLESS link')[0].attrs.input({target:{value:'invalid'}});
+  editor.setState(true,true);
+  assert.equal(controls(editor,'Cancel VLESS editing')[0].disabled,true);
+  editor.setState(false,true);
+  controls(editor,'Cancel VLESS editing')[0].attrs.click();
+  assert.equal(editor.sections[0].url,link);
+  assert.equal(editor.dirty,false);
+  assert.equal(editor.saveButton.disabled,true);
+  assert.equal(state.saved.length,0);
+});
