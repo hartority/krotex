@@ -260,11 +260,11 @@ return view.extend({
 		this.routingLoaded = false;
 		this.devices = [];
 		this.routingList = E('ul', { 'style': 'list-style:none;padding:0;margin:1em 0;color:inherit' }, []);
-		this.savedRoutingMode = 'selected';
+		this.savedRoutingMode = 'all';
 		this.routingMode = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Device routing mode'),
 			'change': ui.createHandlerFn(this, 'handleRoutingMode')
-		}, [ E('option', { 'value': 'selected' }, _('Selected devices')), E('option', { 'value': 'all' }, _('All LAN devices')) ]);
-		this.routingMode.value = 'selected';
+		}, [ E('option', { 'value': 'all' }, _('All LAN devices')), E('option', { 'value': 'selected' }, _('Selected devices')) ]);
+		this.routingMode.value = 'all';
 		this.allDevicesNotice = E('div', { 'style': 'display:none;margin:1em 0;padding:1em;border:1px solid #409eff66;border-radius:8px;background:rgba(64,158,255,.08)' },
 			_('All devices in the LAN firewall zone follow the routing sections, including newly connected devices. Your selected-device list is preserved.'));
 		this.routingSummary = E('p', { 'style': 'margin:.75em 0 1em' }, _('Loading device routing…'));
