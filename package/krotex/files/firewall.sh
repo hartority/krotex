@@ -101,33 +101,69 @@ render_remove() {
 	fi
 }
 
-render() {
-	local entry mac='' count=0
-	for entry in $1; do
-		valid_mac "$entry" || { error 'Invalid device MAC address.'; return 1; }
-		count=$((count + 1)); [ "$count" -le 128 ] || return 1
-		mac="${mac:+$mac, }$entry"
+add_lan_device() {
+	case "$1" in ''|lo|*[!a-zA-Z0-9_.:@-]*) return 1 ;; esac
+	[ "${#1}" -le 15 ] || return 1
+	case " $LAN_DEVICES " in *" $1 "*) return 0 ;; esac
+	LAN_DEVICES="${LAN_DEVICES:+$LAN_DEVICES }$1"
+}
+
+lan_devices() {
+	local zone name network data device
+	LAN_DEVICES=
+	for zone in $(uci -q show firewall | sed -n 's/^\(firewall\.[^.=]*\)=zone$/\1/p'); do
+		name="$(uci -q get "$zone.name")"
+		[ "$name" = lan ] || continue
+		for device in $(uci -q get "$zone.device"); do
+			add_lan_device "$device" || { error 'Invalid LAN device.'; return 1; }
+		done
+		for network in $(uci -q get "$zone.network"); do
+			case "$network" in ''|*[!a-zA-Z0-9_-]*) error 'Invalid LAN network.'; return 1 ;; esac
+			data="$(ubus -t 3 call "network.interface.$network" status 2>/dev/null)" || continue
+			json_load "$data" || continue
+			json_get_var device l3_device
+			[ -n "$device" ] || json_get_var device device
+			[ -n "$device" ] || continue
+			add_lan_device "$device" || { error 'Invalid LAN device.'; return 1; }
+		done
 	done
-	[ -n "$mac" ] || return 1
-	mac="{ $mac }"
+	[ -n "$LAN_DEVICES" ] || { error 'Unable to find devices in the LAN firewall zone.'; return 1; }
+}
+
+render() {
+	local entry mac='' count=0 selector devices=''
+	if [ "${2:-selected}" = all ]; then
+		lan_devices || return 1
+		for entry in $LAN_DEVICES; do devices="${devices:+$devices, }\"$entry\""; done
+		selector="iifname { $devices }"
+	else
+		for entry in $1; do
+			valid_mac "$entry" || { error 'Invalid device MAC address.'; return 1; }
+			count=$((count + 1)); [ "$count" -le 128 ] || return 1
+			mac="${mac:+$mac, }$entry"
+		done
+		[ -n "$mac" ] || return 1
+		mac="{ $mac }"
+		selector="ether saddr $mac"
+	fi
 	render_remove
-	# A negative Ethernet match does not match loopback packets at all. Enter
-	# device rules only on a positive MAC match, so router DNS cannot be captured.
+	# Use a positive MAC or LAN-interface match. A negative Ethernet match does
+	# not exclude loopback packets, which would capture the router's own DNS.
 	cat <<EOF
 add table inet krotex
 add chain inet krotex prerouting { type filter hook prerouting priority -151; policy accept; }
 add chain inet krotex device_prerouting
-add rule inet krotex prerouting ether saddr $mac jump device_prerouting
+add rule inet krotex prerouting $selector jump device_prerouting
 add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10810 accept
 add rule inet krotex device_prerouting fib daddr type { local, broadcast, multicast } return
 add rule inet krotex device_prerouting ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
 add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10809 accept
 add chain inet krotex forward { type filter hook forward priority -5; policy accept; }
-add rule inet krotex forward ether saddr $mac ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
-add rule inet krotex forward ether saddr $mac meta nfproto ipv6 counter reject with icmpx type admin-prohibited
+add rule inet krotex forward $selector ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
+add rule inet krotex forward $selector meta nfproto ipv6 counter reject with icmpx type admin-prohibited
 add chain inet krotex input { type filter hook input priority -5; policy accept; }
-add rule inet krotex input ether saddr $mac meta nfproto ipv6 meta l4proto { tcp, udp } th dport 53 counter reject with icmpx type admin-prohibited
-insert rule inet fw4 input ether saddr $mac meta mark & 0xffff0000 == 0x4b520000 meta l4proto { tcp, udp } counter accept comment "krotex-tproxy"
+add rule inet krotex input $selector meta nfproto ipv6 meta l4proto { tcp, udp } th dport 53 counter reject with icmpx type admin-prohibited
+insert rule inet fw4 input $selector meta mark & 0xffff0000 == 0x4b520000 meta l4proto { tcp, udp } counter accept comment "krotex-tproxy"
 EOF
 	# Existing offloaded connections must re-enter prerouting after selection.
 	if nft list flowtable inet fw4 ft >/dev/null 2>&1; then
@@ -142,12 +178,14 @@ remove_rules() {
 }
 
 apply_rules() {
-	local enabled mac kind keys key macs=''
+	local enabled mac kind keys key macs='' mode
 	if [ ! -f "$CONFIG" ]; then remove_rules; return; fi
 	json_load "$(cat "$CONFIG")" || return 1
 	json_get_var enabled enabled
 	[ "$enabled" = 1 ] || { remove_rules; return; }
 	[ -f "$STATE" ] || { remove_rules; return; }
+	json_get_var mode mode
+	case "$mode" in ''|selected) mode=selected ;; all) ;; *) error 'Invalid routing mode.'; return 1 ;; esac
 	json_get_type kind macs
 	if [ "$kind" = array ]; then
 		json_select macs
@@ -166,9 +204,9 @@ apply_rules() {
 		valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
 		macs=$mac
 	fi
-	[ -n "$macs" ] || { remove_rules; return; }
+	[ "$mode" = all ] || [ -n "$macs" ] || { remove_rules; return; }
 	nft list table inet fw4 >/dev/null 2>&1 || { error 'The fw4 firewall is not running.'; return 1; }
-	render "$macs" > "$WORK/rules.nft" || return 1
+	render "$macs" "$mode" > "$WORK/rules.nft" || return 1
 	nft -c -f "$WORK/rules.nft" || return 1
 	policy_apply || return 1
 	if ! nft -f "$WORK/rules.nft"; then

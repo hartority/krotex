@@ -8,7 +8,7 @@
     },
     "write": {
       "ubus": {
-        "krotex": ["action", "save_connection", "test_connection", "set_routing", "save_sections", "test_section"]
+        "krotex": ["action", "save_connection", "test_connection", "set_routing", "set_routing_mode", "save_sections", "test_section"]
       }
     }
   }

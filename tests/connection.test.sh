@@ -292,6 +292,30 @@ test "$#" -eq 2
 cp "$WORK/routing.json" "$WORK/routing-previous"
 echo 'PASS: legacy single-device settings migrate on add, preserving both devices without duplicates'
 
+printf '{"mode":"all"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 0
+call_routing routing
+json_load "$(cat "$WORK/result")"
+json_get_var mode mode
+json_get_var enabled enabled
+test "$mode" = all && test "$enabled" = 1
+json_select macs; json_get_var first 1; json_get_var second 2
+test "$first" = 02:11:22:33:44:55 && test "$second" = 02:aa:bb:cc:dd:ee
+cp "$WORK/routing.json" "$WORK/all-previous"
+touch "$WORK/routing-fail"
+printf '{"mode":"selected"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 1
+cmp "$WORK/all-previous" "$WORK/routing.json"
+call_routing set_routing_mode
+expect_code 0
+json_load "$(cat "$WORK/routing.json")"
+json_get_var mode mode
+test "$mode" = selected
+cp "$WORK/routing.json" "$WORK/routing-previous"
+echo 'PASS: mode switching preserves selected MACs and failed changes roll back'
+
 touch "$WORK/routing-fail"
 printf '{"enabled":true,"mac":"02:66:77:88:99:aa"}\n' > "$WORK/request"
 call_routing set_routing
@@ -316,6 +340,10 @@ call_routing set_routing
 expect_code 0
 test ! -f "$WORK/routing-active"
 echo 'PASS: device routing can be disabled even when the service is stopped'
+printf '{"mode":"all"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 1
+echo 'PASS: enabling routing for all devices requires the running service'
 
 cat > "$WORK/bin/ucode" <<EOF
 #!/bin/sh
@@ -419,3 +447,34 @@ printf '{"id":"draft"}\n' > "$WORK/request"
 call_sections test_section
 expect_code 1
 echo 'PASS: an unconfigured section saves and reopens without creating a usable VPN route'
+
+printf '{"enabled":false,"mac":""}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+printf '{"mode":"all"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 0
+test -f "$WORK/routing-active"
+cp "$WORK/routing.json" "$WORK/all-previous"
+printf '{"mode":"wan"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 1
+cmp "$WORK/all-previous" "$WORK/routing.json"
+printf '{"mode":"selected"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 0
+test ! -f "$WORK/routing-active"
+echo 'PASS: all-device mode works with an empty selection and rejects invalid modes'
+printf '{"mode":"all"}\n' > "$WORK/request"
+call_routing set_routing_mode
+expect_code 0
+printf '{"enabled":false,"mac":""}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+test ! -f "$WORK/routing-active"
+printf '{"enabled":false,"mode":"all","macs":[]}\n' > "$WORK/routing.json"
+call_routing routing
+json_load "$(cat "$WORK/result")"
+json_get_var enabled enabled
+test "$enabled" = 0
+echo 'PASS: legacy disable also stops all-device routing and disabled status remains accurate'

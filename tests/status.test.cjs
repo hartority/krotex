@@ -13,7 +13,7 @@ function harness(writable = true) {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
     notifications: [], actions: [], pollers: [], code: 0,
-    routing: { enabled: false, active: false, macs: [] }, routingCalls: [], routingCode: 0
+    routing: { enabled: false, active: false, mode:'selected', macs: [] }, routingCalls: [], routingModeCalls: [], routingCode: 0
   };
   const context = vm.createContext({
     setTimeout: fn => fn(),
@@ -30,12 +30,18 @@ function harness(writable = true) {
       }
       if (spec.method === 'devices') return { devices: [{ name: 'Phone', address: '192.168.1.10', mac: '02:11:22:33:44:55' }] };
       if (spec.method === 'routing') return state.routing;
+      if (spec.method === 'set_routing_mode') {
+        state.routingModeCalls.push(action);
+        if (!state.routingCode) state.routing={...state.routing,mode:action,enabled:action==='all'||state.routing.macs.length>0,active:action==='all'||state.routing.macs.length>0};
+        return {code:state.routingCode,message:'Routing rejected'};
+      }
       if (spec.method === 'set_routing') {
         state.routingCalls.push({ mac: action, enabled });
         if (!state.routingCode) {
           const macs = state.routing.macs.filter(mac => mac !== action);
           if (enabled) macs.push(action);
-          state.routing = { macs, enabled: macs.length > 0, active: macs.length > 0 };
+          const mode=state.routing.mode||'selected';
+          state.routing = { mode,macs, enabled: mode==='all'||macs.length > 0, active: mode==='all'||macs.length > 0 };
         }
         return { code: state.routingCode, message: 'Routing rejected' };
       }
@@ -130,7 +136,28 @@ test('DHCP selection immediately adds a device to the visible routing list', asy
   assert.deepEqual(state.routingCalls, [{ mac: '02:11:22:33:44:55', enabled: true }]);
   assert.equal(state.view.busy, false);
   assert.equal(state.view.routingList.children.length, 1);
-  assert.match(state.view.routingList.children[0].children[0].children, /Phone/);
+  assert.equal(state.view.routingList.children[0].children[0].children[0].children,'Phone');
+});
+
+test('all-device mode hides selection and switching back retains selected devices',async()=>{
+  const state=harness();
+  await state.view.handleRouting(true,'02:11:22:33:44:55');
+  state.view.routingMode.value='all';await state.view.handleRoutingMode();
+  assert.equal(state.routing.mode,'all');
+  assert.equal(state.view.deviceSelection.style.display,'none');
+  assert.equal(state.view.allDevicesNotice.style.display,'');
+  assert.match(state.view.routingSummary.textContent,/All LAN devices/);
+  state.view.routingMode.value='selected';await state.view.handleRoutingMode();
+  assert.equal(state.view.deviceSelection.style.display,'');
+  assert.deepEqual(state.routing.macs,['02:11:22:33:44:55']);
+  assert.deepEqual(state.routingModeCalls,['all','selected']);
+});
+
+test('failed mode changes return the selector to the saved setting',async()=>{
+  const state=harness();await state.view.refreshRouting();
+  state.routingCode=1;state.view.routingMode.value='all';await state.view.handleRoutingMode();
+  assert.equal(state.view.routingMode.value,'selected');
+  assert.equal(state.routing.mode,'selected');assert.equal(state.view.busy,false);
 });
 
 test('invalid MAC does not reach RPC and backend routing failure is displayed', async () => {

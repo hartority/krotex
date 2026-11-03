@@ -35,6 +35,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
       const link = 'vless://11111111-2222-4333-8444-555555555555@proxy.example:443?security=tls&sni=example.com&fm=' + 'a'.repeat(1800) + '#Saved%20name';
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
       let macs = [];
+      let routingMode='selected';
       let checkFailure = false;
       let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
@@ -43,7 +44,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         if(spec.method==='save_sections') { saved=JSON.parse(mac);return {code:0}; }
         if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10'};
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
-        if(spec.method==='routing') return {macs:macs.slice(),enabled:!!macs.length,active:!!macs.length};
+        if(spec.method==='routing') return {mode:routingMode,macs:macs.slice(),enabled:routingMode==='all'||!!macs.length,active:routingMode==='all'||!!macs.length};
+        if(spec.method==='set_routing_mode') {routingMode=mac;return {code:0};}
         if(spec.method==='set_routing') { macs=macs.filter(item=>item!==mac); if(enabled)macs.push(mac); return {code:0}; }
         return {code:0};
       }};
@@ -110,6 +112,9 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(editor.sections.length===3&&!editor.dirty,'Reset did not restore saved sections');
           check(card(0).querySelector('input[aria-label="Use for unmatched traffic"]').checked===false,'false checkbox attribute enabled the direct default');
           check(card(2).querySelector('input[aria-label="Use for unmatched traffic"]').checked===true,'default checkbox does not match the model');
+          const defaultLabel=card(2).querySelector('input[aria-label="Use for unmatched traffic"]').parentElement;
+          const domainBox=card(2).querySelector('textarea[aria-label="Domains"]');
+          check(defaultLabel.getBoundingClientRect().top-domainBox.getBoundingClientRect().bottom>=10,'default option lacks padding below domains');
           document.body.style.width='1000px';
           check(page.statsPanel.getBoundingClientRect().height<100,'desktop statistics are too tall');
           check(page.statsPanel.querySelectorAll('dt').length===7,'statistics lost a metric');
@@ -122,6 +127,18 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           page.routingMac.value=mac2;
           await page.handleRouting(true);
           check(page.routingList.children.length===2 && macs.length===2,'second device replaced first');
+          const deviceName=page.routingList.querySelector('strong');
+          check(deviceName.textContent==='Laptop','device card lacks a readable name');
+          check(page.routingList.textContent.includes('192.168.1.10')&&page.routingList.textContent.includes(mac1),'device card lost addresses');
+          document.body.style.color='#ddd';document.body.style.background='#222';
+          check(getComputedStyle(deviceName).color==='rgb(221, 221, 221)','device name is grey in dark mode');
+          document.body.style.color='#222';document.body.style.background='#fff';
+          check(getComputedStyle(deviceName).color==='rgb(34, 34, 34)','device name is unreadable in light mode');
+          page.routingMode.value='all';page.routingMode.dispatchEvent(new Event('change'));await pause();
+          check(routingMode==='all'&&getComputedStyle(page.deviceSelection).display==='none','all mode did not hide device selection');
+          check(getComputedStyle(page.allDevicesNotice).display!=='none','all mode lacks a description');
+          page.routingMode.value='selected';page.routingMode.dispatchEvent(new Event('change'));await pause();
+          check(macs.length===2&&page.routingList.children.length===2,'switching modes lost the saved device list');
           page.routingRemoveButtons[0].click();
           await pause();
           check(macs.length===1 && macs[0]===mac2,'cross removed wrong device');

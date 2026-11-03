@@ -133,6 +133,8 @@ return baseclass.extend({
 					this.changed(); this.renderCards();
 				}, this) });
 			fallback.checked = !!section.fallback;
+			fallback.style.margin = '0';
+			fallback.style.flex = '0 0 auto';
 			fallback.krotexBoundary = section.mode === 'unconfigured';
 			var domains = E('textarea', { 'rows': 4, 'class': 'cbi-input-text', 'style': 'width:100%;box-sizing:border-box;resize:vertical',
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
@@ -171,7 +173,9 @@ return baseclass.extend({
 			}
 			if (section.mode !== 'unconfigured')
 				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains,
-					E('p', {}, [ E('label', {}, [ fallback, ' ', _('Use this section for all unmatched traffic') ]) ]));
+					E('div', { 'style': 'margin-top:.85em;padding:.25em 0' }, [
+						E('label', { 'style': 'display:inline-flex;align-items:center;gap:.45em;line-height:1.5' }, [ fallback, _('Use this section for all unmatched traffic') ])
+					]));
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
 			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #8886;border-radius:6px;padding:1em;margin:1em 0' }, fields);
@@ -269,7 +273,7 @@ return baseclass.extend({
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Routing sections')),
 			E('p', {}, _('Sections match domains from top to bottom. The first match wins. One section can handle all unmatched traffic; otherwise it goes directly.')),
-			E('p', {}, _('Rules apply to devices in the routing list below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
+			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
 			E('div', {}, [ addSection ]), this.cards,
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
 		]);

@@ -35,6 +35,25 @@ cat > "$WORK/bin/ucode" <<EOF
 exec "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/usr/bin/ucode" -L "$RUNTIME/usr/lib/ucode" "\$@"
 EOF
 chmod 0755 "$WORK/bin/ucode"
+cat > "$WORK/bin/uci" <<EOF
+#!/bin/sh
+case "\$*" in
+  '-q show firewall') printf 'firewall.lan=zone\nfirewall.wan=zone\n' ;;
+  '-q get firewall.lan.name') echo lan ;;
+  '-q get firewall.wan.name') echo wan ;;
+  '-q get firewall.lan.network') [ -f "$WORK/no-lan" ] || echo 'lan lan2' ;;
+  *) exit 1 ;;
+esac
+EOF
+cat > "$WORK/bin/ubus" <<'EOF'
+#!/bin/sh
+case "$*" in
+  *network.interface.lan2*) echo '{"l3_device":"lan1"}' ;;
+  *network.interface.lan*) echo '{"l3_device":"lan0"}' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod 0755 "$WORK/bin/uci" "$WORK/bin/ubus"
 PATH="$WORK/bin:$PATH"
 export PATH
 sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
@@ -277,6 +296,47 @@ if nsenter -t "$LAN" -n curl -6 --silent --noproxy '*' --max-time 3 -o /dev/null
 fi
 echo 'PASS: public IPv6 works for an unselected device and is blocked for the selected MAC'
 
+printf '{"enabled":true,"mode":"all","macs":[]}\n' > "$WORK/routing.json"
+fw apply
+for client in "$LAN" "$OTHER"; do
+	before="$(wc -l < "$WORK/access.log")"
+	code="$(nsenter -t "$client" -n curl --silent --show-error --noproxy '*' --max-time 6 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+	test "$code" = 403
+	test "$(wc -l < "$WORK/access.log")" -gt "$before"
+	nsenter -t "$client" -n python3 tests/dns-traffic.py probe
+	if nsenter -t "$client" -n curl -6 --silent --noproxy '*' --max-time 3 -o /dev/null 'http://[2001:db8:3::1]:8080/'; then
+		echo 'FAIL: all-device mode allowed an IPv6 bypass' >&2
+		exit 1
+	fi
+done
+before="$(wc -l < "$WORK/access.log")"
+"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
+	"$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 127.0.0.1 > "$WORK/all-router-dns" 2>&1
+grep -q '203.0.113.77' "$WORK/all-router-dns"
+test "$(wc -l < "$WORK/access.log")" = "$before"
+echo 'PASS: all-device mode captures TCP and DNS on both LANs with no MAC list and leaves loopback DNS direct'
+
+nsenter -t "$OTHER" -n ip addr add 8.8.4.4/32 dev lo
+ip route add 8.8.4.4/32 via 192.168.56.2
+nsenter -t "$WAN" -n ip route add 8.8.4.4/32 via 192.0.2.1
+nsenter -t "$OTHER" -n "$XRAY_TEST_BINARY" run -config "$WORK/endpoint.json" > "$WORK/other-endpoint.log" 2>&1 &
+PIDS="$PIDS $!"
+sleep .2
+before="$(wc -l < "$WORK/access.log")"
+code="$(nsenter -t "$WAN" -n curl --silent --show-error --noproxy '*' --max-time 6 -o /dev/null -w '%{http_code}' http://8.8.4.4:8080/)"
+test "$code" = 403
+test "$(wc -l < "$WORK/access.log")" = "$before"
+echo 'PASS: all-device mode does not capture connections entering from WAN'
+touch "$WORK/no-lan"
+if fw apply > "$WORK/all-error" 2>&1; then
+	echo 'FAIL: all-device mode accepted missing LAN interfaces' >&2
+	exit 1
+fi
+nft list table inet krotex | grep -q 'iifname'
+ip -4 rule show | grep -q '11490:'
+rm "$WORK/no-lan"
+echo 'PASS: unavailable LAN discovery leaves the previous working rules intact'
+
 printf '{"enabled":true,"macs":["02:11:22:33:44:55","02:66:77:88:99:aa"]}\n' > "$WORK/routing.json"
 fw apply
 for client in "$LAN" "$OTHER"; do
@@ -313,6 +373,14 @@ if nsenter -t "$LAN" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null ht
 	exit 1
 fi
 echo 'PASS: a proxy crash does not silently send the selected device directly'
+
+printf '{"enabled":true,"mode":"all","macs":[]}\n' > "$WORK/routing.json"
+fw apply
+if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null http://93.184.216.34:8080/; then
+	echo 'FAIL: all-device mode bypassed the stopped proxy' >&2
+	exit 1
+fi
+echo 'PASS: all-device mode stays closed after a proxy crash'
 
 fw stop
 code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"

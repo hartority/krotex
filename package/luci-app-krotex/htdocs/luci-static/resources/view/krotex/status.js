@@ -21,6 +21,7 @@ var callAction = rpc.declare({
 var callDevices = rpc.declare({ object: 'krotex', method: 'devices', expect: { '': {} } });
 var callRouting = rpc.declare({ object: 'krotex', method: 'routing', expect: { '': {} } });
 var callSetRouting = rpc.declare({ object: 'krotex', method: 'set_routing', params: [ 'mac', 'enabled' ], expect: { '': {} } });
+var callSetRoutingMode = rpc.declare({ object: 'krotex', method: 'set_routing_mode', params: [ 'mode' ], expect: { '': {} } });
 
 return view.extend({
 	load: function() {
@@ -42,7 +43,13 @@ return view.extend({
 		return callRouting().then(L.bind(function(data) {
 			if (data.code) throw new Error(data.message);
 			this.routingMacs = data.macs || (data.enabled && data.mac ? [ data.mac ] : []);
-			this.routingSummary.textContent = !data.enabled ? _('Device routing is disabled')
+			this.savedRoutingMode = data.mode || 'selected';
+			this.routingMode.value = this.savedRoutingMode;
+			var all = this.savedRoutingMode === 'all';
+			this.deviceSelection.style.display = all ? 'none' : '';
+			this.allDevicesNotice.style.display = all ? '' : 'none';
+			this.routingSummary.textContent = all ? (data.active ? _('All LAN devices · Active') : _('All LAN devices · Rules are inactive'))
+				: !data.enabled ? _('No devices selected')
 				: data.active ? _('Active devices: %s').format(this.routingMacs.length)
 				: _('Configured devices: %s; rules are inactive').format(this.routingMacs.length);
 			if (data.active && !this.lastStatus.running)
@@ -57,17 +64,43 @@ return view.extend({
 		this.routingRemoveButtons = [];
 		var rows = (this.routingMacs || []).map(L.bind(function(mac) {
 			var device = (this.devices || []).filter(function(item) { return item.mac.toLowerCase() === mac; })[0];
-			var label = device ? '%s · %s · %s'.format(device.name === '*' ? _('Unnamed device') : device.name, device.address, mac) : mac;
+			var name = device && device.name !== '*' ? device.name : _('Unnamed device');
 			var remove = E('button', {
 				'class': 'btn cbi-button-negative', 'type': 'button', 'title': _('Remove device'),
 				'aria-label': _('Remove device %s').format(mac),
 				'click': ui.createHandlerFn(this, 'handleRemoveDevice', mac)
 			}, '×');
 			this.routingRemoveButtons.push(remove);
-			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:1em;margin:.5em 0' }, [ E('span', {}, label), remove ]);
+			var details = [ E('code', { 'style': 'color:inherit;background:none;padding:0;font-size:.9em;white-space:normal;overflow-wrap:anywhere' }, mac) ];
+			if (device) details.unshift(E('span', { 'style': 'font-size:.9em' }, device.address));
+			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.8em 1em;margin:.6em 0;border:1px solid #409eff66;border-left:3px solid #409eff;border-radius:8px;background:rgba(64,158,255,.08);color:inherit' }, [
+				E('div', { 'style': 'min-width:0;flex:1;color:inherit' }, [
+					E('strong', { 'style': 'display:block;color:inherit;font-size:1em;margin-bottom:.3em;overflow-wrap:anywhere' }, name),
+					E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:.2em 1em;color:inherit' }, details)
+				]), remove
+			]);
 		}, this));
-		this.routingList.replaceChildren.apply(this.routingList, rows.length ? rows : [ E('li', {}, _('No devices added')) ]);
+		this.routingList.replaceChildren.apply(this.routingList, rows.length ? rows : [ E('li', { 'style': 'padding:1em;border:1px dashed #8886;border-radius:8px;color:inherit' }, _('No devices added')) ]);
 		this.updateStatus(this.lastStatus);
+	},
+
+	handleRoutingMode: function() {
+		if (this.busy) return Promise.resolve();
+		var mode = this.routingMode.value;
+		if ([ 'all', 'selected' ].indexOf(mode) === -1) return Promise.resolve();
+		this.busy = true;
+		this.updateStatus(this.lastStatus);
+		this.routingResult.textContent = _('Applying device routing…');
+		return callSetRoutingMode(mode).then(L.bind(function(result) {
+			if (result.code !== 0) throw new Error(result.message || _('Unable to change routing mode.'));
+			this.routingResult.textContent = _('Routing mode applied.');
+		}, this)).catch(L.bind(function(error) {
+			this.routingResult.textContent = error.message;
+			ui.addNotification(null, E('p', {}, error.message));
+		}, this)).then(L.bind(function() {
+			this.busy = false;
+			return this.refresh();
+		}, this));
 	},
 
 	handleRemoveDevice: function(mac) {
@@ -143,6 +176,7 @@ return view.extend({
 		}, this));
 		this.routingMac.disabled = !!this.busy || !available || !L.hasViewPermission();
 		this.deviceSelect.disabled = this.routingMac.disabled;
+		this.routingMode.disabled = this.routingMac.disabled;
 		if (this.sectionsEditor) this.sectionsEditor.setState(!!this.busy, available);
 	},
 
@@ -167,7 +201,14 @@ return view.extend({
 		this.buttons = [];
 		this.routingMacs = [];
 		this.devices = [];
-		this.routingList = E('ul', { 'style': 'list-style:none;padding:0' }, []);
+		this.routingList = E('ul', { 'style': 'list-style:none;padding:0;margin:1em 0;color:inherit' }, []);
+		this.savedRoutingMode = 'selected';
+		this.routingMode = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Device routing mode'),
+			'change': ui.createHandlerFn(this, 'handleRoutingMode')
+		}, [ E('option', { 'value': 'selected' }, _('Selected devices')), E('option', { 'value': 'all' }, _('All LAN devices')) ]);
+		this.routingMode.value = 'selected';
+		this.allDevicesNotice = E('div', { 'style': 'display:none;margin:1em 0;padding:1em;border:1px solid #409eff66;border-left:3px solid #409eff;border-radius:8px;background:rgba(64,158,255,.08)' },
+			_('All devices in the LAN firewall zone follow the routing sections, including newly connected devices. Your selected-device list is preserved.'));
 		this.routingSummary = E('p', {}, _('Loading device routing…'));
 		this.routingResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.routingMac = E('input', {
@@ -195,6 +236,12 @@ return view.extend({
 			'click': ui.createHandlerFn(this, 'refreshDevices')
 		}, _('Refresh devices'));
 		this.buttons.push(refreshDevices);
+		this.deviceSelection = E('div', {}, [
+			E('p', {}, _('Select a device to add it, or enter its MAC address and click Add device.')),
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em' }, [ this.deviceSelect, refreshDevices ]),
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em' }, [ this.routingMac ].concat(routingButtons)),
+			this.routingList
+		]);
 		var rows = [
 			[ 'status', _('Status') ],
 			[ 'core_version', _('Xray version') ],
@@ -242,14 +289,13 @@ return view.extend({
 			this.sectionsEditor.render(),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Device routing')),
+				E('label', { 'style': 'display:block;margin-bottom:.5em' }, _('Apply routing sections to')),
+				this.routingMode,
 				this.routingSummary,
-				E('p', {}, _('Select a device to add it, or enter its MAC address and click Add device. Added devices follow the routing sections for public IPv4 TCP and UDP traffic. Local IPv4 networks and router access remain direct.')),
-				E('div', {}, [ this.deviceSelect, refreshDevices ]),
-				E('div', {}, this.routingMac),
-				E('div', {}, routingButtons),
-				this.routingList,
+				this.allDevicesNotice,
+				this.deviceSelection,
 				this.routingResult,
-				E('p', {}, _('DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when no Xray sections are enabled. Local DHCP hostnames may not resolve. Public IPv6 and IPv6 DNS are blocked for added devices to prevent bypass.')),
+				E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
 				E('p', {}, _('Reconnect devices after adding them. Removing a device or stopping Krotex restores direct access.'))
 			])
 		]);
