@@ -15,7 +15,7 @@ function harness(writable=true){
     L:{bind:(fn,self,...args)=>fn.bind(self,...args),hasViewPermission:()=>writable},
     ui:{addNotification:()=>{}},rpc:{declare:spec=>async(value)=>{
       if(spec.method==='sections')return {sections:state.sections};
-      if(spec.method==='test_section'){state.checks.push(value);return {code:state.testCode||0,ip:'203.0.113.10',message:'Proxy connection failed'};}
+      if(spec.method==='test_section'){state.checks.push(value);return {code:state.testCode||0,ip:'203.0.113.10',latency_ms:124,message:'Proxy connection failed'};}
       const data=JSON.parse(value);state.saved.push(data);
       if(!state.code)state.sections=data;
       return {code:state.code,message:'Rejected'};
@@ -68,6 +68,7 @@ test('section checks target their own saved VPN and cannot test unsaved edits',a
   const state=harness(),editor=state.editor;await editor.load();
   await editor.test(editor.sections[0]);
   assert.deepEqual(state.checks,['vpn1']);assert.match(editor.checkOutputs.vpn1.textContent,/203.0.113.10/);
+  assert.match(editor.checkOutputs.vpn1.textContent,/Latency: 124 ms/);
   editor.changed();await editor.test(editor.sections[0]);
   assert.equal(state.checks.length,1);assert.match(editor.checkOutputs.vpn1.textContent,/Save settings/);
 });

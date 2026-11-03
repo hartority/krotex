@@ -52,7 +52,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           if(saveFailure)return {code:1,message:'Settings rejected'};
           saved=JSON.parse(mac);const routing=JSON.parse(enabled);routingMode=routing.mode;macs=routing.macs;return {code:0};
         }
-        if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10'};
+        if(spec.method==='test_section') return checkFailure ? {code:1,message:'Proxy connection failed'} : {code:0,ip:'203.0.113.10',latency_ms:124};
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
         if(spec.method==='routing') return {mode:routingMode,macs:macs.slice(),enabled:routingMode==='all'||!!macs.length,active:routingMode==='all'||!!macs.length};
         if(spec.method==='set_routing_mode') {routingMode=mac;return {code:0};}
@@ -170,6 +170,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           checkFailure=false;
           checkButton.click();await pause();
           check(output.textContent.includes('203.0.113.10'),'successful check did not replace the error');
+          check(output.textContent.includes('Latency: 124 ms'),'successful check omitted HTTPS latency');
           editor.add();check(editor.sections.length===4,'draft section was not added');
           editor.resetButton.click();await pause();
           check(editor.sections.length===3&&!editor.dirty,'Reset did not restore saved sections');

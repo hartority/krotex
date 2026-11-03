@@ -40,7 +40,16 @@ if [ -f "$TEST_ROOT/fail-request" ]; then
   echo 'curl: (7) Failed to connect to 127.0.0.1 port 10808: Connection refused' >&2
   exit 7
 fi
-echo '203.0.113.25'
+output=
+while [ "$#" -gt 0 ]; do
+  case "$1" in --output) output=$2; shift ;; esac
+  shift
+done
+if [ -n "$output" ]; then
+  echo '203.0.113.25' > "$output"
+  if [ -f "$TEST_ROOT/invalid-timing" ]; then echo invalid
+  else echo '0.123789'; fi
+else echo '203.0.113.25'; fi
 EOF
 cat > "$TEST_ROOT/xray" <<'EOF'
 #!/bin/sh
@@ -393,6 +402,16 @@ printf '{"id":"vpn2"}\n' > "$WORK/request"
 call_sections test_section
 expect_code 0
 grep -q 'socks5h://127.0.0.1:11082' "$TEST_ROOT/curl-args"
+grep -q 'time_starttransfer' "$TEST_ROOT/curl-args"
+json_get_var latency_ms latency_ms
+json_get_var ip ip
+test "$latency_ms" = 124 && test "$ip" = 203.0.113.25
+touch "$TEST_ROOT/invalid-timing"
+call_sections test_section
+expect_code 1
+rm "$TEST_ROOT/invalid-timing"
+echo 'PASS: section checks return rounded HTTPS latency and preserve the exit IP'
+
 rm "$TEST_ROOT/curl-args"
 printf '{"id":"exclude"}\n' > "$WORK/request"
 call_sections test_section

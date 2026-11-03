@@ -64,11 +64,14 @@ if [ "$1" = test_section ]; then
 	json_get_var port port
 	case "$port" in ''|*[!0-9]*) fail 'Invalid connection check.' ;; esac
 	[ "$port" -ge 11080 ] && [ "$port" -le 11111 ] || fail 'Invalid connection check.'
-	result="$(curl --silent --show-error --fail --noproxy '' --proxy "socks5h://127.0.0.1:$port" --connect-timeout 5 --max-time 12 --proto '=https' https://api.ipify.org 2> "$WORK/error")" || fail "The HTTPS request through this section failed. $(head -c 512 "$WORK/error")"
+	elapsed="$(curl --silent --show-error --fail --noproxy '' --proxy "socks5h://127.0.0.1:$port" --connect-timeout 5 --max-time 12 --proto '=https' --output "$WORK/ip" --write-out '%{time_starttransfer}' https://api.ipify.org 2> "$WORK/error")" || fail "The HTTPS request through this section failed. $(head -c 512 "$WORK/error")"
+	result="$(cat "$WORK/ip")"
 	case "$result" in ''|*[!0-9a-fA-F:.]*) fail 'The IP check returned an unexpected response.' ;; esac
+	latency_ms="$(LC_ALL=C awk -v seconds="$elapsed" 'BEGIN { if (seconds !~ /^[0-9]+([.][0-9]+)?$/) exit 1; printf "%.0f", seconds * 1000 }')" || fail 'Unable to measure HTTPS response time.'
 	json_init
 	json_add_int code 0
 	json_add_string ip "$result"
+	json_add_int latency_ms "$latency_ms"
 	json_dump
 	exit 0
 fi

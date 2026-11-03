@@ -241,6 +241,7 @@ return baseclass.extend({
 				}
 				var test = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(function() { return this.test(section); }, this) }, _('Check connection'));
 				var result = E('span', { 'role': 'status', 'aria-live': 'polite', 'aria-label': _('Connection check result'),
+					'title': _('Latency measures HTTPS time to the first response byte through this section, including DNS and connection setup.'),
 					'style': 'flex:1;min-width:10em;overflow-wrap:anywhere' }, '');
 				this.checkOutputs[section.id] = result;
 				var previous = this.checkResults[section.id];
@@ -293,7 +294,10 @@ return baseclass.extend({
 		this.setCheckResult(section.id, _('Checking connection…'), false);
 		return testSection(section.id).then(L.bind(function(result) {
 			if (result.code !== 0) throw new Error(result.message || _('Connection check failed.'));
-			this.setCheckResult(section.id, _('Connection successful. Exit IP: %s').format(result.ip), false);
+			var message = _('Connection successful. Exit IP: %s').format(result.ip);
+			if (Number.isFinite(result.latency_ms) && result.latency_ms >= 0)
+				message += ' \u00b7 ' + _('Latency: %s ms').format(Math.round(result.latency_ms));
+			this.setCheckResult(section.id, message, false);
 		}, this)).catch(L.bind(function(error) { this.setCheckResult(section.id, error.message, true); }, this)).then(L.bind(function() {
 			this.testing = false;
 			if (this.options.onBusy) this.options.onBusy(false);
