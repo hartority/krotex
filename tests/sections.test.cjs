@@ -235,3 +235,19 @@ test('firewall policies enforce IP actions for every protocol and preserve earli
   const blockedDefault=run('firewall',[],run('compile',[section('deny','block',[],true)]));
   assert.match(blockedDefault,/counter drop\n$/);
 });
+
+
+test('inline comments are preserved in editor text and excluded from routing and firewall rules', {skip:!runtime}, () => {
+  const source='14.44.11.11 # CDN prod\n8.8.8.123/24 # subnet\nExample.com# site\n # disabled\n';
+  const config=run('compile',[{...section('deny','block'),domains_text:source}]);
+  assert.equal(run('read',[],config).sections[0].domains_text,source);
+  assert.deepEqual(config.krotex_sections[0].domains,['example.com']);
+  assert.deepEqual(config.krotex_sections[0].ips,['14.44.11.11','8.8.8.0/24']);
+  const rules=config.routing.rules.filter(r=>r.ip||r.domain);
+  assert.equal(JSON.stringify(rules).includes('#'),false);
+  const firewall=run('firewall',[],config);
+  assert.equal(firewall.includes('CDN prod'),false);assert.ok(firewall.includes('14.44.11.11'));
+  assert.deepEqual(run('compile',[section('a','direct',['1.2.3.4 # host'])]).krotex_sections[0].ips,['1.2.3.4']);
+  assert.deepEqual(run('compile',[{...section('a','direct'),domains_text:'example.com # '+ 'x'.repeat(300)}]).krotex_sections[0].domains,['example.com']);
+  assert.throws(()=>run('compile',[{...section('bad','direct'),domains_text:'999.1.2.3 # bad IP'}]));
+});

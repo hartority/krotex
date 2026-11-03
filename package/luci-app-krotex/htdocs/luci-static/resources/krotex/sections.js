@@ -385,7 +385,7 @@ return baseclass.extend({
 	serialize: function() {
 		return this.sections.map(function(section) {
 			var data = { id: section.id, name: section.name, mode: section.mode, enabled: section.enabled, fallback: section.fallback, domains_text: section.domains,
-				domains: section.domains.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(function(line) { return line && line.charAt(0) !== '#'; }) };
+				domains: section.domains.split(/\r?\n/).map(function(line) { return line.split('#', 1)[0].trim(); }).filter(function(line) { return !!line; }) };
 			if (section.mode === 'proxy_devices') { data.macs = (section.macs || []).slice(); data.domains = []; delete data.domains_text; }
 			if ((section.mode === 'proxy' || section.mode === 'proxy_devices') && (section.enabled || section.url.trim())) {
 				try { data.profile = vless.inspect(section.url).profile; data.profile.url = section.url.trim(); }

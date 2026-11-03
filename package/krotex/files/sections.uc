@@ -131,8 +131,9 @@ function normalize(input) {
 			source = split(text(item.domains_text, 131072, 'domain list text'), '\n');
 		let domains = [], ips = [], seen = {};
 		for (let value in source) {
-			if (item.domains_text != null && (!length(trim(value)) || match(trim(value), /^#/))) continue;
-			let domain = lc(trim(text(value, 253, 'destination')));
+			let entry = trim(split(text(value, 131072, 'destination'), '#')[0]);
+			if (!length(entry)) continue;
+			let domain = lc(text(entry, 253, 'destination'));
 			if (index(domain, '/') >= 0 || index(domain, ':') >= 0 || match(domain, /^[0-9.]+$/)) {
 				let ip = ipv4_destination(domain);
 				if (seen[ip]) continue;

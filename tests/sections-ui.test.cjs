@@ -313,3 +313,14 @@ test('the destinations editor preserves mixed IP rules and loads older IP metada
   state.sections[0].ips=['9.9.9.0/24'];state.sections[0].domains=['example.com'];delete state.sections[0].domains_text;
   await editor.load();assert.equal(controls(editor,'Routing destinations')[0].value,'example.com\n9.9.9.0/24');
 });
+
+
+test('inline destination comments survive saves while serialized destinations contain only addresses',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  const source='14.44.11.11 # CDN prod\n8.8.8.0/24 # subnet\nexample.com # site\n# disabled\n';
+  controls(editor,'Routing destinations')[0].attrs.input({target:{value:source}});
+  await editor.save();
+  assert.equal(editor.sections[0].domains,source);
+  assert.equal(state.saved[0][0].domains_text,source);
+  assert.deepEqual(state.saved[0][0].domains,['14.44.11.11','8.8.8.0/24','example.com']);
+});
