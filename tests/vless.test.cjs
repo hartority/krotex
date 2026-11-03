@@ -12,7 +12,7 @@ Baseclass.extend = function(properties) {
   Object.assign(Module.prototype, properties);
   return Module;
 };
-const context = vm.createContext({ URL, _: text => text, baseclass: Baseclass });
+const context = vm.createContext({ URL, URLSearchParams, _: text => text, baseclass: Baseclass });
 vm.runInContext("String.prototype.format = function(value) { return this.replace('%s', value); };", context);
 const factory = vm.runInContext(`(function() { ${source}\n })()`, context);
 function loadModule() {
@@ -22,6 +22,17 @@ function loadModule() {
 }
 const uuid = '11111111-2222-4333-8444-555555555555';
 const prefix = `vless://${uuid}@proxy.example:443?`;
+
+test('reconstructs saved TLS and REALITY profiles, including IPv6 and encoded parameters', () => {
+  const parser = loadModule();
+  for (const link of [
+    prefix + 'security=reality&sni=example.com&pbk=' + 'A'.repeat(43) + '&sid=abcd&spx=%2Fpath%3Fhello%3Dworld&flow=xtls-rprx-vision',
+    `vless://${uuid}@[2001:db8::1]:443?security=tls&sni=example.com&alpn=h2,http%2F1.1`
+  ]) {
+    const profile = parser.parse(link);
+    assert.deepEqual(parser.parse(parser.format(profile)), profile);
+  }
+});
 
 test('exports a constructor accepted by the LuCI module loader', () => {
   assert.equal(typeof loadModule().parse, 'function');

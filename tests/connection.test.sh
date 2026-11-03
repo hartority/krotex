@@ -115,8 +115,23 @@ call connection
 json_load "$(cat "$WORK/result")"
 json_get_var configured configured
 test "$configured" = 1
-! grep -q '11111111\|AAAAAAAAA' "$WORK/result"
-echo 'PASS: REALITY config applies and read-only summary contains no credentials'
+json_select profile
+json_get_var restored_id id
+json_get_var restored_key public_key
+test "$restored_id" = 11111111-2222-4333-8444-555555555555
+test "$restored_key" = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+echo 'PASS: REALITY config applies and returns the profile for restoring older saved links'
+
+saved_link='vless://11111111-2222-4333-8444-555555555555@proxy.example:443?security=reality&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sni=example.com&fm=ignored#Test%20name'
+profile="${profile%?},\"url\":\"$saved_link\"}"
+request
+call save_connection
+expect_code 0
+call connection
+json_load "$(cat "$WORK/result")"
+json_get_var restored_link link
+test "$restored_link" = "$saved_link"
+echo 'PASS: original VLESS link survives saving and reopening, including unknown parameters and label'
 
 cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/saved.json"
 touch "$TEST_ROOT/reject-config"
@@ -161,6 +176,13 @@ json_get_var security security
 test "$security" = tls
 json_select tlsSettings; json_select alpn; json_get_var alpn 2
 test "$alpn" = http/1.1
+call connection
+json_load "$(cat "$WORK/result")"
+json_select profile
+json_get_var restored_alpn alpn
+json_get_var restored_sni server_name
+test "$restored_alpn" = h2,http/1.1
+test "$restored_sni" = example.com
 echo 'PASS: TLS configuration includes ALPN'
 
 cp "$TEST_ROOT/xray" "$TEST_ROOT/private-xray"
@@ -252,8 +274,26 @@ expect_code 1
 cmp "$WORK/routing-previous" "$WORK/routing.json"
 echo 'PASS: routing requires a running service and rejects broadcast MACs'
 
-touch "$WORK/routing-fail"
+printf '{"enabled":true,"mac":"02:11:22:33:44:55"}\n' > "$WORK/routing.json"
 printf '{"enabled":true,"mac":"02:aa:bb:cc:dd:ee"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+call_routing routing
+json_load "$(cat "$WORK/result")"
+json_select macs; json_get_var first 1; json_get_var second 2
+test "$first" = 02:11:22:33:44:55
+test "$second" = 02:aa:bb:cc:dd:ee
+call_routing set_routing
+expect_code 0
+json_load "$(cat "$WORK/routing.json")"
+json_select macs; json_get_keys keys
+set -- $keys
+test "$#" -eq 2
+cp "$WORK/routing.json" "$WORK/routing-previous"
+echo 'PASS: legacy single-device settings migrate on add, preserving both devices without duplicates'
+
+touch "$WORK/routing-fail"
+printf '{"enabled":true,"mac":"02:66:77:88:99:aa"}\n' > "$WORK/request"
 call_routing set_routing
 expect_code 1
 cmp "$WORK/routing-previous" "$WORK/routing.json"
@@ -261,6 +301,16 @@ test -f "$WORK/routing-active"
 echo 'PASS: firewall failure restores previous routing settings'
 
 rm "$WORK/service-active"
+printf '{"enabled":false,"mac":"02:11:22:33:44:55"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+json_load "$(cat "$WORK/routing.json")"
+json_select macs; json_get_var remaining 1; json_get_keys keys
+test "$remaining" = 02:aa:bb:cc:dd:ee
+set -- $keys
+test "$#" -eq 1
+echo 'PASS: removing one device preserves the other even while the service is stopped'
+
 printf '{"enabled":false,"mac":""}\n' > "$WORK/request"
 call_routing set_routing
 expect_code 0

@@ -2,6 +2,16 @@
 'require baseclass';
 
 return baseclass.extend({
+	format: function(profile) {
+		var address = profile.address.indexOf(':') !== -1 ? '[' + profile.address + ']' : profile.address;
+		var params = new URLSearchParams({ encryption: 'none', type: 'tcp', security: profile.security });
+		var fields = { server_name: 'sni', fingerprint: 'fp', public_key: 'pbk', short_id: 'sid', spider_x: 'spx', flow: 'flow', alpn: 'alpn' };
+		Object.keys(fields).forEach(function(key) {
+			if (profile[key]) params.set(fields[key], profile[key]);
+		});
+		return 'vless://' + encodeURIComponent(profile.id) + '@' + address + ':' + profile.port + '?' + params.toString();
+	},
+
 	parse: function(value) {
 		return this.inspect(value).profile;
 	},

@@ -271,6 +271,35 @@ if nsenter -t "$LAN" -n curl -6 --silent --noproxy '*' --max-time 3 -o /dev/null
 	exit 1
 fi
 echo 'PASS: public IPv6 works for an unselected device and is blocked for the selected MAC'
+
+printf '{"enabled":true,"macs":["02:11:22:33:44:55","02:66:77:88:99:aa"]}\n' > "$WORK/routing.json"
+fw apply
+for client in "$LAN" "$OTHER"; do
+	before="$(wc -l < "$WORK/access.log")"
+	code="$(nsenter -t "$client" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+	test "$code" = 403
+	test "$(wc -l < "$WORK/access.log")" -gt "$before"
+done
+nsenter -t "$OTHER" -n python3 tests/dns-traffic.py probe
+if nsenter -t "$OTHER" -n curl -6 --silent --noproxy '*' --max-time 3 -o /dev/null 'http://[2001:db8:3::1]:8080/'; then
+	echo 'FAIL: second selected device bypassed routing over IPv6' >&2
+	exit 1
+fi
+echo 'PASS: both selected devices use TPROXY, including DNS and IPv6 bypass protection'
+
+printf '{"enabled":true,"macs":["02:66:77:88:99:aa"]}\n' > "$WORK/routing.json"
+fw apply
+before="$(wc -l < "$WORK/access.log")"
+code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+test "$code" = 403
+test "$(wc -l < "$WORK/access.log")" = "$before"
+code="$(nsenter -t "$OTHER" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+test "$code" = 403
+test "$(wc -l < "$WORK/access.log")" -gt "$before"
+echo 'PASS: removing one MAC restores only that device to direct access'
+printf '{"enabled":true,"macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
+fw apply
+
 kill "$CLIENT_PID"
 wait "$CLIENT_PID" 2>/dev/null || :
 fw apply

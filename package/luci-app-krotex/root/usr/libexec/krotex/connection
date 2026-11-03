@@ -56,17 +56,39 @@ running() {
 }
 
 summary() {
-	local address port security configured=0
-	if json_load "$(cat "$CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1; then
+	local address port security configured=0 url id flow server_name fingerprint public_key short_id spider_x alpn entries entry value
+	if json_load "$(cat "$CONFIG" 2>/dev/null)"; then
+		json_get_var url krotex_link
+	fi
+	if json_select outbounds && json_select 1; then
 		local protocol tag
 		json_get_var protocol protocol
 		json_get_var tag tag
 		if [ "$protocol" = vless ] && [ "$tag" = proxy ]; then
-			json_select streamSettings && json_get_var security security
+			json_select streamSettings
+			json_get_var security security
+			if [ "$security" = reality ]; then json_select realitySettings; else json_select tlsSettings; fi
+			json_get_var server_name serverName
+			json_get_var fingerprint fingerprint
+			json_get_var public_key publicKey
+			json_get_var short_id shortId
+			json_get_var spider_x spiderX
+			if json_select alpn; then
+				json_get_keys entries
+				for entry in $entries; do
+					json_get_var value "$entry"
+					alpn="${alpn:+$alpn,}$value"
+				done
+				json_select ..
+			fi
+			json_select ..
 			json_select ..
 			if json_select settings && json_select vnext && json_select 1; then
 				json_get_var address address
 				json_get_var port port
+				json_select users && json_select 1
+				json_get_var id id
+				json_get_var flow flow
 				configured=1
 			fi
 		fi
@@ -76,6 +98,16 @@ summary() {
 	json_add_string address "$address"
 	json_add_int port "${port:-0}"
 	json_add_string security "$security"
+	json_add_string link "$url"
+	if [ "$configured" = 1 ]; then
+		json_add_object profile
+		for entry in id address security server_name fingerprint public_key short_id spider_x flow alpn; do
+			eval 'value=${'"$entry"'}'
+			json_add_string "$entry" "$value"
+		done
+		json_add_int port "$port"
+		json_close_object
+	fi
 	json_dump
 }
 
@@ -86,6 +118,13 @@ read_profile() {
 	json_load "$request" || fail 'Invalid request.'
 	json_get_var profile profile
 	[ -n "$profile" ] && json_load "$profile" || fail 'Invalid connection settings.'
+	url=
+	json_get_type kind url
+	if [ -n "$kind" ]; then
+		[ "$kind" = string ] || fail 'Invalid VLESS link.'
+		json_get_var url url
+		case "$url" in vless://*) ;; *) fail 'Invalid VLESS link.' ;; esac
+	fi
 	# Rebuild the configuration from scalar fields, never accept a raw Xray config.
 	for field in id address security server_name fingerprint public_key short_id spider_x flow alpn; do
 		json_get_type kind "$field"
@@ -113,6 +152,7 @@ read_profile() {
 
 generate() {
 	json_init
+	[ -z "$url" ] || json_add_string krotex_link "$url"
 	json_add_object log
 	json_add_string loglevel warning
 	json_close_object

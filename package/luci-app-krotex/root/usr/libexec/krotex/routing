@@ -33,6 +33,7 @@ reply() {
 }
 fail() { reply 1 "$1"; exit 0; }
 valid_mac() {
+	case "$1" in ''|*[!a-fA-F0-9:]*) return 1 ;; esac
 	printf '%s\n' "$1" | grep -Eq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$' || return 1
 	[ "$1" != 00:00:00:00:00:00 ] && [ "$((0x${1%%:*} & 1))" -eq 0 ]
 }
@@ -55,22 +56,54 @@ devices() {
 	json_dump
 }
 
-status() {
-	local enabled=0 mac='' active=0
-	if json_load "$(cat "$CONFIG" 2>/dev/null)"; then
-		json_get_var enabled enabled
+read_macs() {
+	local enabled kind keys key mac count=0
+	MACS=
+	json_load "$(cat "$CONFIG" 2>/dev/null)" || return 1
+	json_get_var enabled enabled
+	[ "$enabled" = 1 ] || return 0
+	json_get_type kind macs
+	if [ "$kind" = array ]; then
+		json_select macs
+		json_get_keys keys
+		for key in $keys; do
+			json_get_type kind "$key"
+			[ "$kind" = string ] || return 1
+			json_get_var mac "$key"
+			valid_mac "$mac" || return 1
+			mac="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
+			case " $MACS " in *" $mac "*) continue ;; esac
+			count=$((count + 1)); [ "$count" -le 128 ] || return 1
+			MACS="${MACS:+$MACS }$mac"
+		done
+	else
+		[ -z "$kind" ] || return 1
 		json_get_var mac mac
+		valid_mac "$mac" || return 1
+		MACS="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
 	fi
-	"$FIREWALL" status && active=1
+}
+
+write_macs() {
+	local entry
 	json_init
-	json_add_boolean enabled "${enabled:-0}"
-	json_add_string mac "$mac"
+	json_add_boolean enabled "$([ -n "$MACS" ] && echo 1 || echo 0)"
+	json_add_array macs
+	for entry in $MACS; do json_add_string '' "$entry"; done
+	json_close_array
+}
+
+status() {
+	local active=0 MACS
+	read_macs || { reply 1 'Invalid saved routing settings.'; return; }
+	"$FIREWALL" status && active=1
+	write_macs
 	json_add_boolean active "$active"
 	json_dump
 }
 
 save() {
-	local request mac enabled kind protocol tag detail
+	local request mac enabled kind protocol tag detail MACS entry updated=''
 	IFS= read -r request
 	[ "${#request}" -le 1024 ] && json_load "$request" || fail 'Invalid routing request.'
 	json_get_type kind enabled
@@ -85,6 +118,23 @@ save() {
 	fi
 	mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
 	LOCKED=1
+	read_macs || fail 'Invalid saved routing settings.'
+	for entry in $MACS; do
+		[ "$entry" = "$mac" ] || updated="${updated:+$updated }$entry"
+	done
+	if [ "$enabled" = 1 ]; then
+		case " $MACS " in
+			*" $mac "*) updated=$MACS ;;
+			*)
+				set -- $updated
+				[ "$#" -lt 128 ] || fail 'A maximum of 128 devices is supported.'
+				updated="${updated:+$updated }$mac"
+				;;
+		esac
+	elif [ -z "$mac" ]; then
+		updated=
+	fi
+	MACS=$updated
 	if [ "$enabled" = 1 ]; then
 		json_load "$(cat "$CORE_CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
 		json_get_var protocol protocol
@@ -95,9 +145,7 @@ save() {
 	umask 077
 	WORK="$(mktemp -d /etc/krotex/.routing.XXXXXX)" || fail 'Unable to create temporary files.'
 	cp "$CONFIG" "$WORK/previous.json" || fail 'Unable to back up routing settings.'
-	json_init
-	json_add_boolean enabled "$enabled"
-	json_add_string mac "$mac"
+	write_macs
 	json_dump > "$WORK/new.json" || fail 'Unable to generate routing settings.'
 	mv "$WORK/new.json" "$CONFIG" || fail 'Unable to save routing settings.'
 	CHANGED=1

@@ -43,37 +43,60 @@ return view.extend({
 
 	refreshRouting: function() {
 		return callRouting().then(L.bind(function(data) {
-			this.savedRoutingMac = data.mac || '';
+			if (data.code) throw new Error(data.message);
+			this.routingMacs = data.macs || (data.enabled && data.mac ? [ data.mac ] : []);
 			this.routingSummary.textContent = !data.enabled ? _('Device routing is disabled')
-				: data.active ? _('Active for %s').format(data.mac)
-				: _('Configured for %s; rules are inactive').format(data.mac);
+				: data.active ? _('Active devices: %s').format(this.routingMacs.length)
+				: _('Configured devices: %s; rules are inactive').format(this.routingMacs.length);
 			if (data.active && !this.lastStatus.running)
 				this.routingSummary.textContent += ' · ' + _('Xray is stopped');
-			if (!this.routingEdited && data.mac)
-				this.routingMac.value = data.mac;
+			this.renderRoutingDevices();
 		}, this)).catch(L.bind(function() {
 			this.routingSummary.textContent = _('Device routing status unavailable');
 		}, this));
 	},
 
+	renderRoutingDevices: function() {
+		this.routingRemoveButtons = [];
+		var rows = (this.routingMacs || []).map(L.bind(function(mac) {
+			var device = (this.devices || []).filter(function(item) { return item.mac.toLowerCase() === mac; })[0];
+			var label = device ? '%s · %s · %s'.format(device.name === '*' ? _('Unnamed device') : device.name, device.address, mac) : mac;
+			var remove = E('button', {
+				'class': 'btn cbi-button-negative', 'type': 'button', 'title': _('Remove device'),
+				'aria-label': _('Remove device %s').format(mac),
+				'click': ui.createHandlerFn(this, 'handleRemoveDevice', mac)
+			}, '×');
+			this.routingRemoveButtons.push(remove);
+			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:1em;margin:.5em 0' }, [ E('span', {}, label), remove ]);
+		}, this));
+		this.routingList.replaceChildren.apply(this.routingList, rows.length ? rows : [ E('li', {}, _('No devices added')) ]);
+		this.updateStatus(this.lastStatus);
+	},
+
+	handleRemoveDevice: function(mac) {
+		return this.handleRouting(false, mac);
+	},
+
 	refreshDevices: function() {
 		return callDevices().then(L.bind(function(data) {
+			this.devices = data.devices || [];
 			var options = [ E('option', { 'value': '' }, _('Select a DHCP device')) ];
 			(data.devices || []).forEach(function(device) {
 				options.push(E('option', { 'value': device.mac }, '%s · %s · %s'.format(
 					device.name === '*' ? _('Unnamed device') : device.name, device.address, device.mac)));
 			});
 			this.deviceSelect.replaceChildren.apply(this.deviceSelect, options);
+			this.renderRoutingDevices();
 		}, this)).catch(function(error) {
 			ui.addNotification(null, E('p', {}, _('Unable to load DHCP devices. Enter the MAC address manually.')));
 		});
 	},
 
-	handleRouting: function(enabled) {
+	handleRouting: function(enabled, selectedMac) {
 		if (this.busy)
 			return Promise.resolve();
-		var mac = enabled ? this.routingMac.value.trim().toLowerCase() : (this.savedRoutingMac || '');
-		if ((enabled || mac) && !/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) {
+		var mac = (selectedMac || this.routingMac.value).trim().toLowerCase();
+		if (!/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) {
 			ui.addNotification(null, E('p', {}, _('Enter a valid device MAC address.')));
 			return Promise.resolve();
 		}
@@ -83,7 +106,11 @@ return view.extend({
 		return callSetRouting(mac, enabled).then(L.bind(function(result) {
 			if (result.code !== 0)
 				throw new Error(result.message || _('Unable to apply device routing.'));
-			this.routingResult.textContent = enabled ? _('Device routing enabled.') : _('Device routing disabled.');
+			this.routingResult.textContent = enabled ? _('Device added.') : _('Device removed.');
+			if (enabled) {
+				this.routingMac.value = '';
+				this.deviceSelect.value = '';
+			}
 		}, this)).catch(L.bind(function(error) {
 			this.routingResult.textContent = error.message;
 			ui.addNotification(null, E('p', {}, error.message));
@@ -98,6 +125,10 @@ return view.extend({
 			this.connectionSummary.textContent = data.configured
 				? '%s:%s · %s'.format(data.address, data.port, data.security.toUpperCase())
 				: _('No VLESS connection configured');
+			if (!this.connectionEdited && data.configured) {
+				this.connectionInput.value = data.link || (data.profile ? vless.format(data.profile) : '');
+				this.handleConnectionInput(false);
+			}
 		}, this)).catch(L.bind(function() {
 			this.connectionSummary.textContent = _('Connection settings unavailable');
 		}, this));
@@ -108,6 +139,7 @@ return view.extend({
 			var result = vless.inspect(this.connectionInput.value);
 			this.connectionWarning.textContent = result.ignored.length
 				? _('Ignored parameters (not applied): %s').format(result.ignored.join(', ')) : '';
+			result.profile.url = this.connectionInput.value.trim();
 			return result.profile;
 		}
 		catch (error) {
@@ -116,7 +148,13 @@ return view.extend({
 		}
 	},
 
-	handleConnectionInput: function() {
+	handleConnectionInput: function(edited) {
+		if (edited !== false) this.connectionEdited = true;
+		setTimeout(L.bind(function() {
+			this.connectionInput.style.height = 'auto';
+			var border = (this.connectionInput.offsetHeight || 0) - (this.connectionInput.clientHeight || 0);
+			this.connectionInput.style.height = Math.max(120, this.connectionInput.scrollHeight + border) + 'px';
+		}, this), 0);
 		if (!this.connectionInput.value.trim()) {
 			this.connectionWarning.textContent = '';
 			return;
@@ -145,6 +183,7 @@ return view.extend({
 					throw new Error(result.message || _('Connection operation failed.'));
 				this.connectionResult.textContent = action === 'save' ? _('Connection saved and applied.')
 					: _('Connection successful. Exit IP: %s').format(result.ip);
+				if (action === 'save') this.connectionEdited = false;
 			}, this)).catch(L.bind(function(error) {
 				this.connectionResult.textContent = error.message;
 				ui.addNotification(null, E('p', {}, error.message));
@@ -175,7 +214,7 @@ return view.extend({
 		this.fields.memory.textContent = running ? '%.1f MiB'.format((Number(data.memory_kib) || 0) / 1024) : '—';
 		this.fields.updated.textContent = available ? new Date().toLocaleTimeString() : '—';
 
-		this.buttons.forEach(L.bind(function(button) {
+		this.buttons.concat(this.routingRemoveButtons || []).forEach(L.bind(function(button) {
 			button.disabled = !!this.busy || !available || !L.hasViewPermission();
 		}, this));
 		this.connectionInput.disabled = !!this.busy || !available || !L.hasViewPermission();
@@ -202,24 +241,25 @@ return view.extend({
 	render: function(data) {
 		this.fields = {};
 		this.buttons = [];
-		this.routingEdited = false;
+		this.routingMacs = [];
+		this.devices = [];
+		this.routingList = E('ul', { 'style': 'list-style:none;padding:0' }, []);
+		this.connectionEdited = false;
 		this.routingSummary = E('p', {}, _('Loading device routing…'));
 		this.routingResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.routingMac = E('input', {
 			'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff',
-			'aria-label': _('Device MAC address'), 'autocomplete': 'off', 'spellcheck': 'false',
-			'input': L.bind(function() { this.routingEdited = true; }, this)
+			'aria-label': _('Device MAC address'), 'autocomplete': 'off', 'spellcheck': 'false'
 		});
 		this.deviceSelect = E('select', {
 			'class': 'cbi-input-select', 'aria-label': _('Device'),
 			'change': L.bind(function() {
 				if (this.deviceSelect.value) {
-					this.routingMac.value = this.deviceSelect.value;
-					this.routingEdited = true;
+					return this.handleRouting(true, this.deviceSelect.value);
 				}
 			}, this)
 		}, []);
-		var routingButtons = [ [ true, _('Route this device') ], [ false, _('Disable device routing') ] ].map(L.bind(function(action) {
+		var routingButtons = [ [ true, _('Add device') ] ].map(L.bind(function(action) {
 			var button = E('button', {
 				'class': 'btn cbi-button-action', 'style': 'margin:.5em .5em .5em 0',
 				'click': ui.createHandlerFn(this, 'handleRouting', action[0])
@@ -236,7 +276,7 @@ return view.extend({
 		this.connectionResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.connectionWarning = E('p', { 'class': 'cbi-value-description', 'role': 'status', 'aria-live': 'polite' }, '');
 		this.connectionInput = E('textarea', {
-			'rows': 5, 'class': 'cbi-input-text', 'style': 'width:100%;resize:vertical;overflow-wrap:anywhere',
+			'rows': 5, 'wrap': 'soft', 'class': 'cbi-input-text', 'style': 'width:100%;resize:vertical;overflow-wrap:anywhere;box-sizing:border-box',
 			'placeholder': 'vless://…', 'autocomplete': 'off', 'spellcheck': 'false',
 			'aria-label': _('VLESS link'), 'disabled': !L.hasViewPermission(),
 			'input': L.bind(this.handleConnectionInput, this)
@@ -299,13 +339,14 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Device routing')),
 				this.routingSummary,
-				E('p', {}, _('Select one device or enter its MAC address. Its public IPv4 TCP and UDP traffic will use the proxy. Local IPv4 networks and router access remain direct.')),
+				E('p', {}, _('Select a device to add it, or enter its MAC address and click Add device. Added devices use the proxy for public IPv4 TCP and UDP traffic. Local IPv4 networks and router access remain direct.')),
 				E('div', {}, [ this.deviceSelect, refreshDevices ]),
 				E('div', {}, this.routingMac),
 				E('div', {}, routingButtons),
+				this.routingList,
 				this.routingResult,
-				E('p', {}, _('DNS is sent through the proxy to 1.1.1.1; local DHCP hostnames may not resolve. Public IPv6 and IPv6 DNS are blocked for this device to prevent bypass.')),
-				E('p', {}, _('Reconnect the device after applying the rule. Disabling routing or stopping Krotex restores direct access.'))
+				E('p', {}, _('DNS is sent through the proxy to 1.1.1.1; local DHCP hostnames may not resolve. Public IPv6 and IPv6 DNS are blocked for added devices to prevent bypass.')),
+				E('p', {}, _('Reconnect devices after adding them. Removing a device or stopping Krotex restores direct access.'))
 			])
 		]);
 		this.updateStatus(data);

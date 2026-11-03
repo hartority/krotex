@@ -13,16 +13,18 @@ function harness(writable = true) {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
     notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: [],
-    routing: { enabled: false, active: false, mac: '' }, routingCalls: [], routingCode: 0
+    connection: { configured: false },
+    routing: { enabled: false, active: false, macs: [] }, routingCalls: [], routingCode: 0
   };
   const context = vm.createContext({
-    E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '',
+    setTimeout: fn => fn(),
+    E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
       replaceChildren(...items) { this.children = items; } }),
     _: text => text,
     vless: { inspect: value => {
       if (value !== 'vless://valid') throw new Error('Invalid link');
       return { profile: { id: 'test-uuid', address: 'proxy.example' }, ignored: state.ignored };
-    } },
+    }, format: () => 'vless://valid' },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
     rpc: { declare: spec => async (action, enabled) => {
@@ -30,7 +32,7 @@ function harness(writable = true) {
         if (state.offline) throw new Error('RPC offline');
         return state.response;
       }
-      if (spec.method === 'connection') return { configured: false };
+      if (spec.method === 'connection') return state.connection;
       if (spec.method === 'save_connection') {
         state.saved.push(JSON.parse(action));
         return { code: state.connectionCode, message: 'Rejected' };
@@ -40,6 +42,11 @@ function harness(writable = true) {
       if (spec.method === 'routing') return state.routing;
       if (spec.method === 'set_routing') {
         state.routingCalls.push({ mac: action, enabled });
+        if (!state.routingCode) {
+          const macs = state.routing.macs.filter(mac => mac !== action);
+          if (enabled) macs.push(action);
+          state.routing = { macs, enabled: macs.length > 0, active: macs.length > 0 };
+        }
         return { code: state.routingCode, message: 'Routing rejected' };
       }
       state.actions.push(action);
@@ -123,7 +130,7 @@ test('applying a link sends a profile and keeps the link visible', async () => {
   const state = harness();
   state.view.connectionInput.value = 'vless://valid';
   await state.view.handleConnection('save');
-  assert.deepEqual(state.saved, [{ id: 'test-uuid', address: 'proxy.example' }]);
+  assert.deepEqual(state.saved, [{ id: 'test-uuid', address: 'proxy.example', url: 'vless://valid' }]);
   assert.equal(state.view.connectionInput.value, 'vless://valid');
   assert.equal(state.view.connectionResult.textContent, 'Connection saved and applied.');
   assert.equal(state.view.busy, false);
@@ -168,16 +175,16 @@ test('connection check displays the exit IP', async () => {
   assert.equal(state.view.connectionResult.textContent, 'Connection successful. Exit IP: 203.0.113.2');
 });
 
-test('DHCP selection sets the device MAC and applies only that device', async () => {
+test('DHCP selection immediately adds a device to the visible routing list', async () => {
   const state = harness();
   await state.view.refreshDevices();
   assert.equal(state.view.deviceSelect.children.length, 2);
   state.view.deviceSelect.value = '02:11:22:33:44:55';
-  state.view.deviceSelect.attrs.change();
-  assert.equal(state.view.routingMac.value, '02:11:22:33:44:55');
-  await state.view.handleRouting(true);
+  await state.view.deviceSelect.attrs.change();
   assert.deepEqual(state.routingCalls, [{ mac: '02:11:22:33:44:55', enabled: true }]);
   assert.equal(state.view.busy, false);
+  assert.equal(state.view.routingList.children.length, 1);
+  assert.match(state.view.routingList.children[0].children[0].children, /Phone/);
 });
 
 test('invalid MAC does not reach RPC and backend routing failure is displayed', async () => {
@@ -192,10 +199,35 @@ test('invalid MAC does not reach RPC and backend routing failure is displayed', 
   assert.equal(state.view.busy, false);
 });
 
-test('routing can be disabled even if the edited MAC is invalid', async () => {
+test('adding two devices preserves both, and the cross removes only its own device', async () => {
   const state = harness();
-  await state.view.refreshRouting();
+  await state.view.handleRouting(true, '02:11:22:33:44:55');
+  await state.view.handleRouting(true, '02:aa:bb:cc:dd:ee');
+  assert.equal(state.view.routingList.children.length, 2);
   state.view.routingMac.value = 'invalid';
-  await state.view.handleRouting(false);
-  assert.deepEqual(state.routingCalls, [{ mac: '', enabled: false }]);
+  await state.view.routingRemoveButtons[0].attrs.click();
+  assert.deepEqual(state.routing.macs, ['02:aa:bb:cc:dd:ee']);
+  assert.equal(state.view.routingList.children.length, 1);
+  await state.view.routingRemoveButtons[0].attrs.click();
+  assert.equal(state.routing.enabled, false);
+  assert.equal(state.view.routingList.children[0].children, 'No devices added');
+});
+
+test('opening the page restores the saved link and sizes the textbox to all content', async () => {
+  const state = harness();
+  state.connection = { configured: true, link: 'vless://valid', address: 'proxy.example', port: 443, security: 'reality' };
+  await state.view.refreshConnection();
+  assert.equal(state.view.connectionInput.value, 'vless://valid');
+  assert.equal(state.view.connectionInput.style.height, '320px');
+  state.view.connectionInput.value = 'unfinished edit';
+  state.view.connectionInput.attrs.input();
+  await state.view.refreshConnection();
+  assert.equal(state.view.connectionInput.value, 'unfinished edit');
+});
+
+test('older connections without an original link are reconstructed', async () => {
+  const state = harness();
+  state.connection = { configured: true, profile: {}, address: 'proxy.example', port: 443, security: 'tls' };
+  await state.view.refreshConnection();
+  assert.equal(state.view.connectionInput.value, 'vless://valid');
 });

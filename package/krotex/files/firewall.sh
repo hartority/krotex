@@ -21,6 +21,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 valid_mac() {
+	case "$1" in ''|*[!a-fA-F0-9:]*) return 1 ;; esac
 	printf '%s\n' "$1" | grep -Eq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$' || return 1
 	[ "$1" != 00:00:00:00:00:00 ] && [ "$((0x${1%%:*} & 1))" -eq 0 ]
 }
@@ -101,8 +102,14 @@ render_remove() {
 }
 
 render() {
-	valid_mac "$1" || { error 'Invalid device MAC address.'; return 1; }
-	local mac="$1"
+	local entry mac='' count=0
+	for entry in $1; do
+		valid_mac "$entry" || { error 'Invalid device MAC address.'; return 1; }
+		count=$((count + 1)); [ "$count" -le 128 ] || return 1
+		mac="${mac:+$mac, }$entry"
+	done
+	[ -n "$mac" ] || return 1
+	mac="{ $mac }"
 	render_remove
 	# A negative Ethernet match does not match loopback packets at all. Enter
 	# device rules only on a positive MAC match, so router DNS cannot be captured.
@@ -135,16 +142,33 @@ remove_rules() {
 }
 
 apply_rules() {
-	local enabled mac
+	local enabled mac kind keys key macs=''
 	if [ ! -f "$CONFIG" ]; then remove_rules; return; fi
 	json_load "$(cat "$CONFIG")" || return 1
 	json_get_var enabled enabled
-	json_get_var mac mac
 	[ "$enabled" = 1 ] || { remove_rules; return; }
 	[ -f "$STATE" ] || { remove_rules; return; }
-	valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
+	json_get_type kind macs
+	if [ "$kind" = array ]; then
+		json_select macs
+		json_get_keys keys
+		for key in $keys; do
+			json_get_type kind "$key"
+			[ "$kind" = string ] || return 1
+			json_get_var mac "$key"
+			valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
+			case " $macs " in *" $mac "*) continue ;; esac
+			macs="${macs:+$macs }$mac"
+		done
+	else
+		[ -z "$kind" ] || return 1
+		json_get_var mac mac
+		valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
+		macs=$mac
+	fi
+	[ -n "$macs" ] || { remove_rules; return; }
 	nft list table inet fw4 >/dev/null 2>&1 || { error 'The fw4 firewall is not running.'; return 1; }
-	render "$mac" > "$WORK/rules.nft" || return 1
+	render "$macs" > "$WORK/rules.nft" || return 1
 	nft -c -f "$WORK/rules.nft" || return 1
 	policy_apply || return 1
 	if ! nft -f "$WORK/rules.nft"; then
