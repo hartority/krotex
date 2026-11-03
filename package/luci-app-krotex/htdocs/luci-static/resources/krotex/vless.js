@@ -1,6 +1,7 @@
 'use strict';
+'require baseclass';
 
-return {
+return baseclass.extend({
 	parse: function(value) {
 		var url;
 		try {
@@ -53,4 +54,4 @@ return {
 			throw new Error(_('Custom ALPN is supported only for TLS connections.'));
 		return profile;
 	}
-};
+});
