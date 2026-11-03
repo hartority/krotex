@@ -95,8 +95,8 @@ return baseclass.extend({
 		this.summary = E('span', { 'role': 'status', 'style': 'overflow-wrap:anywhere' }, _('Loading connections...'));
 		this.button = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(this.checkAll, this) }, _('Check all'));
 		this.button.disabled = true;
-		return E('div', { 'class': 'cbi-section', 'aria-label': _('Xray connections') }, [
-			E('h3', {}, _('Xray connections')),
+		return E('div', { 'class': 'cbi-section', 'aria-label': _('Xray connections'), 'style': 'padding:1em;margin:.5em 0 1em;border:1px solid #8884;border-radius:6px' }, [
+			E('h3', { 'style': 'margin:0 0 .5em' }, _('Xray connections')),
 			E('p', {}, _('Unique saved connections from all routing sections, including disabled ones. Each is checked once when Overview opens. Latency is HTTPS response time, including connection setup.')),
 			this.list,
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin-top:.75em' }, [ this.button, this.summary ]) ]);

@@ -352,7 +352,7 @@ return view.extend({
 			default: E('section', { 'id': 'krotex-default', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-default' }, [
 				this.sectionsEditor.generalPanel,
 				E('div', { 'class': 'cbi-section' }, [
-					E('h3', {}, _('Devices using default routing')),
+					E('h3', {}, _('Devices using Smart routing')),
 					E('label', { 'style': 'display:block;margin-bottom:.5em' }, _('Apply routing sections to')),
 					this.routingMode, this.routingSummary, this.allDevicesNotice, this.deviceSelection,
 					E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
@@ -363,7 +363,7 @@ return view.extend({
 		};
 		this.tabButtons = {};
 		this.tabItems = {};
-		var tabs = [ [ 'overview', _('Overview') ], [ 'default', _('Default routing') ], [ 'devices', _('Device routing') ] ];
+		var tabs = [ [ 'overview', _('Overview') ], [ 'default', _('Smart routing') ], [ 'devices', _('Device routing') ] ];
 		var tabBar = E('ul', { 'class': 'cbi-tabmenu', 'role': 'tablist', 'aria-label': _('Krotex pages'), 'style': 'display:flex;flex-wrap:wrap' }, tabs.map(L.bind(function(tab, index) {
 			var link = E('a', { 'href': '#krotex-' + tab[0], 'id': 'krotex-tab-' + tab[0], 'role': 'tab', 'aria-controls': 'krotex-' + tab[0],
 				'click': L.bind(function(event) { event.preventDefault(); this.showTab(tab[0]); }, this),

@@ -132,7 +132,7 @@ return baseclass.extend({
 				E('span', {}, device ? '%s · %s · %s'.format(device.name === '*' ? _('Unnamed device') : device.name, device.address, mac) : mac), remove ]);
 		}, this));
 		return E('div', {}, [
-			E('p', { 'class': 'cbi-value-description' }, _('All external traffic and DNS from these devices use this VPN, independently of Device routing and general rules. Local networks remain direct.')),
+			E('p', { 'class': 'cbi-value-description' }, _('All external traffic and DNS from these devices use this VPN, independently of Smart routing. Local networks remain direct.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin:.75em 0' }, [ select, manual, add ]),
 			E('ul', { 'style': 'list-style:none;padding:0;margin:.5em 0' }, rows.length ? rows : [ E('li', {}, _('No devices selected.')) ]) ]);
 	},
@@ -430,16 +430,16 @@ return baseclass.extend({
 		this.setState(false, this.available);
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
 		this.generalPanel = E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Routing sections')),
-			E('p', {}, _('Sections match domains from top to bottom. The first match wins. Choose the route for all remaining traffic below.')),
-			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
+			E('h3', {}, _('Smart routing')),
+			E('p', {}, _('Choose which websites use VPN, connect directly, or are blocked. Sections are checked from top to bottom; the first match wins.')),
+			E('p', {}, _('Choose below which devices use these rules. Connections without a visible hostname use the route for unmatched traffic.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
 			]), this.cards
 		]);
 		this.devicePanel = E('div', { 'class': 'cbi-section' }, [
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em;margin-top:1em' }, [ E('h3', { 'style': 'margin:0' }, _('VPN for devices')), addDeviceVpn ]),
-			E('p', {}, _('Each device VPN handles all external traffic from its assigned devices and takes priority over general rules.')),
+			E('p', {}, _('Send all external traffic from selected devices through a VPN. These assignments take priority over Smart routing rules.')),
 			this.deviceCards
 		]);
 		return E('div', {}, [ this.generalPanel, this.devicePanel ].concat(this.options.externalActions ? [] : [
