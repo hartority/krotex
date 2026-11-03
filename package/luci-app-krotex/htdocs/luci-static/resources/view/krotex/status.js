@@ -295,48 +295,35 @@ return view.extend({
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em' }, [ this.routingMac ].concat(routingButtons)),
 			this.routingList
 		]);
+		var actions = [
+			[ 'start', _('Start') ], [ 'stop', _('Stop') ], [ 'restart', _('Restart') ],
+			[ 'enable', _('Enable autostart') ], [ 'disable', _('Disable autostart') ]
+		].map(L.bind(function(action) {
+			var button = E('button', { 'class': 'btn cbi-button-action', 'type': 'button', 'style': 'margin:0',
+				'click': ui.createHandlerFn(this, 'handleAction', action[0]) }, action[1]);
+			this.buttons.push(button);
+			return button;
+		}, this));
+		var actionStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;max-width:100%';
+		this.serviceActions = E('div', { 'aria-label': _('Service controls'), 'style': actionStyle }, actions.slice(0, 3));
+		this.autostartActions = E('div', { 'aria-label': _('Autostart controls'), 'style': actionStyle }, actions.slice(3));
 		var rows = [
-			[ 'status', _('Status') ],
-			[ 'krotex_version', _('Krotex version') ],
-			[ 'core_version', _('Xray version') ],
-			[ 'enabled', _('Autostart') ],
-			[ 'pid', _('PID') ],
-			[ 'uptime', _('Uptime') ],
-			[ 'memory', _('Memory') ],
-			[ 'updated', _('Updated') ]
+			[ 'status', _('Status') ], [ 'enabled', _('Autostart') ],
+			[ 'krotex_version', _('Krotex version') ], [ 'core_version', _('Xray version') ],
+			[ 'pid', _('PID') ], [ 'uptime', _('Uptime') ], [ 'memory', _('Memory') ], [ 'updated', _('Updated') ]
 		].map(L.bind(function(row) {
-			this.fields[row[0]] = E('span', {}, '—');
-			return E('div', { 'style': 'min-width:0' }, [
-				E('dt', { 'style': 'display:block;float:none;font-size:.85em;opacity:.75;margin:0 0 .2em' }, row[1]),
-				E('dd', { 'style': 'display:block;float:none;margin:0;font-weight:600;font-variant-numeric:tabular-nums' }, this.fields[row[0]])
+			var controls = row[0] === 'status' ? [ this.serviceActions ] : row[0] === 'enabled' ? [ this.autostartActions ] : [];
+			this.fields[row[0]] = E('span', { 'style': 'display:inline-block;font-weight:600;font-variant-numeric:tabular-nums' + (controls.length ? ';min-width:6em' : '') }, '\u2014');
+			return E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.4em 1em;min-width:0' }, [
+				E('dt', { 'style': 'display:block;float:none;flex:0 0 8em;margin:0;opacity:.75' }, row[1]),
+				E('dd', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;flex:1 1 18em;min-width:0;gap:.5em 1em;float:none;margin:0' }, [ this.fields[row[0]] ].concat(controls))
 			]);
 		}, this));
 		this.statsPanel = E('dl', {
 			'class': 'cbi-section', 'aria-label': _('Service statistics'), 'title': _('Status refreshes every 5 seconds.'),
-			'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5em,1fr));gap:.6em .8em;padding:.75em 1em;margin:.5em 0 .75em;border:1px solid #8884;border-radius:6px'
+			'style': 'display:flex;flex-direction:column;gap:.85em;padding:1em;margin:.5em 0 1em;border:1px solid #8884;border-radius:6px'
 		}, rows);
-
-		var actions = [
-			[ 'start', _('Start') ],
-			[ 'stop', _('Stop') ],
-			[ 'restart', _('Restart') ],
-			[ 'enable', _('Enable autostart') ],
-			[ 'disable', _('Disable autostart') ]
-		].map(L.bind(function(action) {
-			var button = E('button', {
-				'class': 'btn cbi-button-action',
-				'style': 'margin:0',
-				'click': ui.createHandlerFn(this, 'handleAction', action[0])
-			}, action[1]);
-			this.buttons.push(button);
-			return button;
-		}, this));
-		this.serviceActions = E('div', { 'aria-label': _('Service controls'),
-			'style': 'display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:.5em;max-width:100%'
-		}, actions);
-		this.pageHeader = E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75em 1em;margin-bottom:.75em' }, [
-			E('h3', { 'style': 'margin:0' }, _('Service overview')), this.serviceActions
-		]);
+		this.pageHeader = E('div', { 'style': 'margin-bottom:.75em' }, [ E('h3', { 'style': 'margin:0' }, _('Service overview')) ]);
 
 		this.sectionsEditor = sections.create({
 			externalActions: true,

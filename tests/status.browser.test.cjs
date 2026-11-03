@@ -184,16 +184,19 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           page.tabButtons.overview.click();await pause();
           document.body.style.width='1000px';
 
-          const heading=page.pageHeader.querySelector('h3').getBoundingClientRect();
-          const actions=page.serviceActions.getBoundingClientRect();
-          check(actions.left>heading.right&&Math.abs(actions.y-heading.y)<30,'service controls are not beside the heading');
-          check(page.pageHeader.getBoundingClientRect().bottom<=page.statsPanel.getBoundingClientRect().top,'service controls remain under the statistics');
-          check(page.statsPanel.getBoundingClientRect().height<100,'desktop statistics are too tall');
+          const statusRow=page.fields.status.parentElement.parentElement;
+          const autostartRow=page.fields.enabled.parentElement.parentElement;
+          check(page.serviceActions.parentElement===page.fields.status.parentElement,'service controls are not beside Status');
+          check(page.autostartActions.parentElement===page.fields.enabled.parentElement,'autostart controls are not beside Autostart');
+          check(page.serviceActions.querySelectorAll('button').length===3&&page.autostartActions.querySelectorAll('button').length===2,'actions are grouped incorrectly');
+          check(Math.abs(page.serviceActions.getBoundingClientRect().top-page.fields.status.getBoundingClientRect().top)<15,'status controls are on a separate row');
+          check(autostartRow.getBoundingClientRect().top>=statusRow.getBoundingClientRect().bottom,'Autostart does not follow Status');
           check(page.statsPanel.querySelectorAll('dt').length===8,'statistics lost a metric');
+          const metrics=Array.from(page.statsPanel.children);
+          check(metrics.every((row,index)=>!index||row.getBoundingClientRect().top>=metrics[index-1].getBoundingClientRect().bottom),'overview metrics are not stacked');
           document.body.style.width='320px';
-          check(page.statsPanel.scrollWidth<=page.statsPanel.clientWidth+2,'statistics overflow on mobile');
-          check(page.statsPanel.getBoundingClientRect().height<240,'mobile statistics are too tall');
-          check(page.pageHeader.scrollWidth<=page.pageHeader.clientWidth+2,'service controls overflow on mobile');
+          check(page.statsPanel.scrollWidth<=page.statsPanel.clientWidth+2,'overview overflows on mobile');
+          check(page.serviceActions.scrollWidth<=page.serviceActions.clientWidth+2&&page.autostartActions.scrollWidth<=page.autostartActions.clientWidth+2,'overview actions overflow on mobile');
           page.tabButtons.default.click();await pause();
           page.deviceSelect.value=mac1;
           page.deviceSelect.dispatchEvent(new Event('change'));
