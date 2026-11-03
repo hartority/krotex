@@ -88,7 +88,7 @@ function normalize(input) {
 		ids[id] = true;
 		let name = trim(text(item.name, 128, 'section name'));
 		check(length(name), 'Enter a section name.');
-		check(item.mode == 'direct' || item.mode == 'proxy' || item.mode == 'unconfigured', 'Invalid section mode.');
+		check(item.mode == 'direct' || item.mode == 'proxy' || item.mode == 'block' || item.mode == 'unconfigured', 'Invalid section mode.');
 		check(type(item.enabled) == 'bool' && type(item.fallback) == 'bool', 'Invalid section state.');
 		if (item.mode == 'unconfigured')
 			check(!item.enabled && !item.fallback, 'Choose a section type before enabling it.');
@@ -124,7 +124,7 @@ function compile(sections) {
 	let inbounds = [{ tag: 'local-socks', listen: '127.0.0.1', port: 10808, protocol: 'socks', settings: { auth: 'noauth', udp: false } }];
 	for (let index, section in sections) {
 		if (!section.enabled) continue;
-		let tag = section.mode == 'proxy' ? 'section-' + section.id : 'direct';
+		let tag = section.mode == 'proxy' ? 'section-' + section.id : section.mode == 'block' ? 'block' : 'direct';
 		if (section.mode == 'proxy') {
 			push(outbounds, outbound(section.profile, tag));
 			let check_tag = 'section-check-' + section.id;
@@ -136,6 +136,8 @@ function compile(sections) {
 		if (length(section.domains))
 			push(rules, { type: 'field', inboundTag: traffic, domain: map(section.domains, d => 'domain:' + d), outboundTag: tag });
 	}
+	if (filter(sections, s => s.enabled && s.mode == 'block')[0])
+		push(outbounds, { tag: 'block', protocol: 'blackhole', settings: { response: { type: 'none' } } });
 	// Explicit catch-all is last regardless of where the default section is
 	// displayed. It must not swallow another section's domain rules or DNS.
 	push(rules, { type: 'field', inboundTag: traffic, outboundTag: fallback });

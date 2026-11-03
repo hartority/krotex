@@ -92,3 +92,31 @@ test('unconfigured sections persist without producing routes, outbounds or a def
   assert.throws(()=>run('compile',[{...draft,enabled:true}]));
   assert.throws(()=>run('compile',[{...draft,fallback:true}]));
 });
+
+
+test('Block uses blackhole while preserving priority, subdomains and optional unmatched blocking', {skip:!runtime}, () => {
+  const config=run('compile',[section('exception','direct',['allowed.blocked.example']),
+    section('deny','block',['Blocked.Example','*.blocked.example']),
+    section('deny2','block',['another.example']),section('vpn','proxy',[],true)]);
+  const rules=config.routing.rules.filter(rule=>rule.inboundTag.includes('device-tproxy'));
+  assert.deepEqual(rules.map(rule=>rule.outboundTag),['direct','block','block','section-vpn']);
+  assert.deepEqual(rules[1].domain,['domain:blocked.example']);
+  assert.deepEqual(config.outbounds.filter(o=>o.protocol==='blackhole'),[
+    {tag:'block',protocol:'blackhole',settings:{response:{type:'none'}}}
+  ]);
+  assert.equal(run('read',[],config).sections[1].mode,'block');
+  assert.equal(config.inbounds.some(i=>i.tag==='section-check-deny'),false);
+  const disabled=run('compile',[{...section('deny','block',['blocked.example']),enabled:false}]);
+  assert.equal(disabled.outbounds.some(o=>o.protocol==='blackhole'),false);
+  assert.equal(disabled.routing.rules.some(r=>r.domain),false);
+  const fallback=run('compile',[section('allow','direct',['allowed.example']),section('deny','block',[],true)]);
+  assert.equal(fallback.routing.rules.at(-1).outboundTag,'block');
+  assert.equal(fallback.outbounds.find(o=>o.tag==='proxy').protocol,'freedom','DNS must remain usable when unmatched traffic is blocked');
+  if(process.env.XRAY_TEST_BINARY) {
+    const work=mkdtempSync(join(tmpdir(),'krotex-block-'));
+    try {
+      const path=join(work,'config.json');writeFileSync(path,JSON.stringify(config));
+      execFileSync(process.env.XRAY_TEST_BINARY,['run','-test','-config',resolve(__dirname,'../package/krotex/files/transparent.json'),'-config',path],{stdio:'pipe'});
+    } finally {rmSync(work,{recursive:true,force:true});}
+  }
+});

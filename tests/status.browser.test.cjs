@@ -97,6 +97,11 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(route(0).value==='proxy','saved proxy is displayed with the wrong type');
           choose(0,'direct');
           check(route(0).value==='direct'&&!card(0).querySelector('textarea[aria-label="VLESS link"]'),'type and VLESS field disagree');
+          choose(0,'block');
+          check(route(0).value==='block'&&!card(0).querySelector('textarea[aria-label="VLESS link"]'),'Block shows VLESS settings or the wrong type');
+          check(getComputedStyle(card(0)).backgroundColor==='rgba(217, 48, 37, 0.08)','Block lacks a red background');
+          check(!editor.serialize()[0].profile,'Block retains a proxy profile');
+
           choose(0,'proxy');
           check(route(0).value==='proxy'&&card(0).querySelector('textarea[aria-label="VLESS link"]').value===link,'cannot switch back to Xray');
           check(editor.topControls.length===4,'section controls must include one default route selector');

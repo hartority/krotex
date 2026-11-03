@@ -117,9 +117,9 @@ return baseclass.extend({
 		var selected = '';
 		var options = [ E('option', { 'value': '' }, _('Direct (without a section)')) ];
 		this.sections.forEach(function(section) {
-			if (!section.enabled || [ 'direct', 'proxy' ].indexOf(section.mode) < 0) return;
+			if (!section.enabled || [ 'direct', 'proxy', 'block' ].indexOf(section.mode) < 0) return;
 			options.push(E('option', { 'value': section.id }, '%s · %s'.format(
-				section.name || _('Unnamed section'), section.mode === 'proxy' ? _('Xray') : _('Direct'))));
+				section.name || _('Unnamed section'), section.mode === 'proxy' ? _('Xray') : section.mode === 'block' ? _('Block') : _('Direct'))));
 			if (section.fallback) selected = section.id;
 		});
 		this.fallbackSelect.replaceChildren.apply(this.fallbackSelect, options);
@@ -130,7 +130,7 @@ return baseclass.extend({
 		if (this.externalBusy || this.saving || this.testing || this.resetting || !L.hasViewPermission()) return;
 		var id = this.fallbackSelect.value;
 		if (id && !this.sections.some(function(section) {
-			return section.id === id && section.enabled && [ 'direct', 'proxy' ].indexOf(section.mode) >= 0;
+			return section.id === id && section.enabled && [ 'direct', 'proxy', 'block' ].indexOf(section.mode) >= 0;
 		})) { this.refreshFallbackOptions(); return; }
 		this.sections.forEach(function(section) { section.fallback = section.id === id; });
 		this.changed();
@@ -140,7 +140,7 @@ return baseclass.extend({
 		this.controls = this.topControls.slice();
 		this.checkOutputs = Object.create(null);
 		this.refreshFallbackOptions();
-		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)' };
+		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)', block: 'rgba(217,48,37,.08)' };
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var actionRow;
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
@@ -155,7 +155,7 @@ return baseclass.extend({
 					this.changed(); this.renderCards();
 				}, this)
 			}, [ E('option', { 'value': 'unconfigured' }, _('Not configured')),
-				E('option', { 'value': 'direct' }, _('Direct')), E('option', { 'value': 'proxy' }, _('Xray')) ]);
+				E('option', { 'value': 'direct' }, _('Direct')), E('option', { 'value': 'proxy' }, _('Xray')), E('option', { 'value': 'block' }, _('Block')) ]);
 			// LuCI sets attributes verbatim: selected="false" is still selected.
 			mode.value = section.mode;
 			// Keep the native checkbox accessible, but hide theme-drawn pseudo-elements too.

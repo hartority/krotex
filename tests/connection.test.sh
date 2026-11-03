@@ -533,3 +533,15 @@ test ! -f "$WORK/routing-active"
 json_load "$(cat "$WORK/routing.json")"; json_get_var enabled enabled
 test "$enabled" = 0
 echo 'PASS: unified save can clear sections and disable all device routing together'
+
+
+sections='[{"id":"deny","name":"Blocked sites","mode":"block","enabled":true,"fallback":false,"domains":["blocked.example"]}]'
+routing='{"mode":"selected","macs":[]}'
+settings_request
+call_sections save_settings; expect_code 0
+call_sections sections
+json_load "$(cat "$WORK/result")"; json_select sections; json_select 1; json_get_var mode mode
+test "$mode" = block
+printf '{"id":"deny"}\n' > "$WORK/request"
+call_sections test_section; expect_code 1
+echo 'PASS: unified settings saves and reopens Block without VLESS and rejects proxy checks on it'

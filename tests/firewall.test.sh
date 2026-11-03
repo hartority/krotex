@@ -264,6 +264,8 @@ grep -q '203.0.113.77' "$WORK/dns-result"
 grep -Eq '\[device-dns (>>|->) device-dns-proxy\]' "$WORK/access.log"
 echo 'PASS: device DNS is carried over UDP through VLESS'
 
+# Allow section changes to be tested without the unrelated DNS stress matrix.
+if [ "${KROTEX_TEST_SECTIONS_ONLY:-0}" != 1 ]; then
 nsenter -t "$LAN" -n python3 tests/dns-traffic.py probe || {
 	tail -n 35 "$WORK/client.log" "$WORK/server.log" "$WORK/dns-server.log"
 	exit 1
@@ -365,6 +367,10 @@ echo 'PASS: removing one MAC restores only that device to direct access'
 printf '{"enabled":true,"macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
 fw apply
 
+fi
+printf '{"enabled":true,"macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
+fw apply
+
 kill "$CLIENT_PID"
 wait "$CLIENT_PID" 2>/dev/null || :
 fw apply
@@ -423,6 +429,22 @@ probe_section sub.one.krotex.test section-vpn1
 probe_section two.krotex.test section-vpn2
 probe_section unmatched.krotex.test section-vpn2
 echo 'PASS: HTTP domain rules choose direct, VPN 1 or VPN 2; subdomains and first-match exclusions work'
+probe_section allowed.blocked.krotex.test direct
+probe_blocked() {
+	local host="$1" scheme="$2" port="$3" before
+	before="$(wc -l < "$WORK/sections-client.log")"
+	if nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 6 --cacert "$WORK/server.crt" --resolve "$host:$port:93.184.216.34" -o /dev/null "$scheme://$host:$port/" 2> "$WORK/block-error"; then
+		echo "Blocked domain reached the destination: $host" >&2
+		return 1
+	fi
+	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->) block]'
+}
+probe_blocked blocked.krotex.test http 8080
+probe_blocked sub.blocked.krotex.test http 8080
+probe_blocked blocked.krotex.test https 8443
+probe_section one.krotex.test section-vpn1
+echo 'PASS: Block rejects HTTP, HTTPS and subdomains through real TPROXY while earlier exceptions and other VPN domains remain reachable'
+
 for number in 1 2; do
 	port=$((11080 + number))
 	before="$(wc -l < "$WORK/sections-client.log")"

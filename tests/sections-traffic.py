@@ -39,11 +39,13 @@ for index, port in enumerate((2443, 2444), start=1):
                      "short_id": "", "spider_x": "/", "flow": "", "alpn": ""})
 sections = [
     {"id": "exclude", "name": "exclude", "enabled": True, "mode": "direct", "fallback": False,
-     "domains": ["exclude.krotex.test", "overlap.krotex.test"]},
+     "domains": ["exclude.krotex.test", "overlap.krotex.test", "allowed.blocked.krotex.test"]},
     {"id": "vpn1", "name": "VPN 1", "enabled": True, "mode": "proxy", "fallback": False,
      "domains": ["one.krotex.test", "overlap.krotex.test"], "profile": profiles[0]},
     {"id": "vpn2", "name": "VPN 2", "enabled": True, "mode": "proxy", "fallback": True,
-     "domains": ["two.krotex.test"], "profile": profiles[1]}
+     "domains": ["two.krotex.test"], "profile": profiles[1]},
+    {"id": "deny", "name": "Blocked domains", "enabled": True, "mode": "block", "fallback": False,
+     "domains": ["blocked.krotex.test"]}
 ]
 (work / "sections-request.json").write_text(json.dumps({"sections": json.dumps(sections)}))
 # The second variant has no default VPN: all unmatched traffic must be direct.

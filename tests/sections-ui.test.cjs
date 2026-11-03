@@ -222,3 +222,21 @@ test('Cancel discards link-only edits and respects read-only state',async()=>{
   assert.equal(editor.saveButton.disabled,true);
   assert.equal(state.saved.length,0);
 });
+
+
+test('Block configures domains without VLESS and saves through the shared section model',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  editor.add();chooseMode(editor,1,'block');
+  assert.equal(editor.sections[1].enabled,true);
+  assert.equal(controls(editor,'Section route')[1].value,'block');
+  assert.equal(controls(editor,'VLESS link').length,0);
+  controls(editor,'Domains')[1].attrs.input({target:{value:'blocked.example'}});
+  editor.fallbackSelect.value=editor.sections[1].id;editor.handleFallbackChange();
+  assert.equal(editor.sections[1].fallback,true);
+  assert.match(editor.fallbackSelect.children[2].children,/Block/);
+  await editor.save();
+  assert.equal(state.saved[0][1].mode,'block');
+  assert.deepEqual(state.saved[0][1].domains,['blocked.example']);
+  assert.equal(state.saved[0][1].profile,undefined);
+  assert.equal(controls(editor,'Section route')[1].value,'block');
+});
