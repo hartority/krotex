@@ -14,7 +14,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
     const view = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'));
     const vless = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'));
     const sections = utf8(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'));
-    const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace}
+    const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace;margin:6px;padding:4px}
       /* LuCI Bootstrap draws its own checkbox using pseudo-elements. */
       input[type=checkbox]::before,input[type=checkbox]::after{position:absolute;content:""}
       input[type=checkbox]::before{top:0;left:0;width:14px;height:14px;background:#555;border:1px solid #888}
@@ -30,7 +30,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           // particular selected="false" still selects an HTML option.
           else if (value != null) element.setAttribute(key, typeof value === 'object' ? JSON.stringify(value) : value);
         }
-        if (children != null) element.append(...(Array.isArray(children) ? children : [children]).filter(child=>child!=null));
+        if (children != null) element.append(...(Array.isArray(children) ? children : [children]));
         return element;
       };
       const L = { bind:(fn,self,...args)=>fn.bind(self,...args), hasViewPermission:()=>true };
@@ -68,15 +68,27 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         try {
           document.body.append(page.render(await page.load()));
           await pause();
+          check(!document.body.textContent.includes('nullnull'),'null children are rendered below the sections');
           const endpoint=document.querySelector('[aria-label="Configured VLESS server"]');
           const change=document.querySelector('button[aria-label="Change VLESS connection"]');
           check(endpoint.textContent==='proxy.example:443','saved server summary is missing');
           check(!document.querySelector('textarea[aria-label="VLESS link"]'),'saved connection is not collapsed');
           check(endpoint.parentElement===change.parentElement,'Change is not beside the saved endpoint');
           check(endpoint.parentElement.getBoundingClientRect().height<70,'saved connection is not compact');
+          const previewStyle=getComputedStyle(endpoint);
+          const previewPadding=[previewStyle.paddingTop,previewStyle.paddingLeft,previewStyle.paddingBottom];
+          const previewBounds=endpoint.getBoundingClientRect();
+          const previewFontSize=previewStyle.fontSize,previewLineHeight=previewStyle.lineHeight;
+          const previewMargins=[getComputedStyle(endpoint.parentElement).marginTop,getComputedStyle(endpoint.parentElement).marginBottom];
           change.click();await pause();
           const input=document.querySelector('textarea[aria-label="VLESS link"]');
           check(input.value===link,'saved link is incomplete');
+          const inputStyle=getComputedStyle(input);
+          check(JSON.stringify([inputStyle.paddingTop,inputStyle.paddingLeft,inputStyle.paddingBottom])===JSON.stringify(previewPadding),'textbox inner padding differs from the preview');
+          check(inputStyle.margin==='0px'&&getComputedStyle(input).display==='block','theme margins or baseline spacing remain on the textbox');
+          check(JSON.stringify([getComputedStyle(input.parentElement).marginTop,getComputedStyle(input.parentElement).marginBottom])===JSON.stringify(previewMargins),'textbox outer margins differ from the preview');
+          check(Math.abs(input.getBoundingClientRect().top-previewBounds.top)<1&&Math.abs(input.getBoundingClientRect().left-previewBounds.left)<1,'textbox moves up or sideways when opened');
+          check(inputStyle.fontSize===previewFontSize&&inputStyle.lineHeight===previewLineHeight,'textbox typography differs from the preview');
           check(input.scrollHeight<=input.clientHeight+2,'textbox clips saved link');
           check(input.clientHeight>500,'long link was not expanded');
           const cancel=document.querySelector('[aria-label="Cancel VLESS editing"]');

@@ -140,6 +140,7 @@ return baseclass.extend({
 		this.controls = this.topControls.slice();
 		this.checkOutputs = Object.create(null);
 		this.refreshFallbackOptions();
+		var linkAppearance = 'box-sizing:border-box;margin:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;font-size:inherit;line-height:1.5;overflow-wrap:anywhere';
 		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)', block: 'rgba(217,48,37,.08)' };
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var actionRow;
@@ -199,12 +200,12 @@ return baseclass.extend({
 				if (section.editingConnection) {
 					var warning = E('p', { 'role': 'status', 'class': 'cbi-value-description' }, '');
 					var link = E('textarea', { 'rows': 4, 'wrap': 'soft', 'class': 'cbi-input-text',
-						'style': 'width:100%;box-sizing:border-box;resize:vertical;overflow-wrap:anywhere',
+						'style': linkAppearance + ';display:block;width:100%;resize:vertical',
 						'aria-label': _('VLESS link'), 'placeholder': 'vless://…', 'spellcheck': 'false', 'autocomplete': 'off',
 						'input': L.bind(function(event) { section.url = event.target.value; this.changed(); this.linkWarning(link, warning); }, this) });
 					link.value = section.url;
 					this.controls.push(link);
-					var linkBox = E('div', { 'style': 'position:relative' }, [ link ]);
+					var linkBox = E('div', { 'style': 'position:relative;margin:.5em 0' }, [ link ]);
 					fields.push(linkBox, warning);
 					if (section.connectionBeforeEdit != null) {
 						var cancel = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'aria-label': _('Cancel VLESS editing'),
@@ -235,7 +236,7 @@ return baseclass.extend({
 					this.controls.push(change);
 					fields.push(E('div', { 'style': 'display:flex;align-items:stretch;gap:.6em;margin:.5em 0' }, [
 						E('span', { 'aria-label': _('Configured VLESS server'),
-							'style': 'display:flex;align-items:center;flex:1;min-width:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;overflow-wrap:anywhere' }, endpoint), change
+							'style': linkAppearance + ';display:flex;align-items:center;flex:1;min-width:0' }, endpoint), change
 					]));
 				}
 				var test = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'click': L.bind(function() { return this.test(section); }, this) }, _('Check connection'));
@@ -355,8 +356,9 @@ return baseclass.extend({
 			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
-			]), this.cards,
-			this.options.externalActions ? null : E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.options.externalActions ? null : this.result
-		]);
+			]), this.cards
+		].concat(this.options.externalActions ? [] : [
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
+		]));
 	}
 });
