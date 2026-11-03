@@ -3,6 +3,10 @@
 
 return baseclass.extend({
 	parse: function(value) {
+		return this.inspect(value).profile;
+	},
+
+	inspect: function(value) {
 		var url;
 		try {
 			url = new URL(value.trim());
@@ -15,9 +19,12 @@ return baseclass.extend({
 
 		var params = url.searchParams;
 		var allowed = [ 'encryption', 'security', 'type', 'flow', 'sni', 'fp', 'pbk', 'sid', 'spx', 'alpn', 'headerType' ];
+		var ignored = [];
 		params.forEach(function(value, key) {
-			if (allowed.indexOf(key) === -1 || params.getAll(key).length !== 1)
-				throw new Error(_('Unsupported or repeated VLESS parameter: %s').format(key));
+			if (params.getAll(key).length !== 1)
+				throw new Error(_('Repeated VLESS parameter: %s').format(key));
+			if (allowed.indexOf(key) === -1)
+				ignored.push(key);
 		});
 		if ([ 'tcp', 'raw' ].indexOf(params.get('type') || 'tcp') === -1 ||
 			(params.get('headerType') && params.get('headerType') !== 'none'))
@@ -52,6 +59,6 @@ return baseclass.extend({
 			throw new Error(_('Invalid REALITY short ID.'));
 		if (profile.security === 'reality' && profile.alpn)
 			throw new Error(_('Custom ALPN is supported only for TLS connections.'));
-		return profile;
+		return { profile: profile, ignored: ignored };
 	}
 });

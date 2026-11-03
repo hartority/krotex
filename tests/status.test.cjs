@@ -12,14 +12,14 @@ function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048 },
-    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0
+    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: []
   };
   const context = vm.createContext({
     E: (tag, attrs, children) => ({ tag, attrs, children, style: {}, textContent: '' }),
     _: text => text,
-    vless: { parse: value => {
+    vless: { inspect: value => {
       if (value !== 'vless://valid') throw new Error('Invalid link');
-      return { id: 'test-uuid', address: 'proxy.example' };
+      return { profile: { id: 'test-uuid', address: 'proxy.example' }, ignored: state.ignored };
     } },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
@@ -110,14 +110,35 @@ test('failed service command notifies the user and releases controls', async () 
   assert.ok(state.view.buttons.every(button => !button.disabled));
 });
 
-test('applying a link sends a profile and clears the credential input', async () => {
+test('applying a link sends a profile and keeps the link visible', async () => {
   const state = harness();
   state.view.connectionInput.value = 'vless://valid';
   await state.view.handleConnection('save');
   assert.deepEqual(state.saved, [{ id: 'test-uuid', address: 'proxy.example' }]);
-  assert.equal(state.view.connectionInput.value, '');
+  assert.equal(state.view.connectionInput.value, 'vless://valid');
   assert.equal(state.view.connectionResult.textContent, 'Connection saved and applied.');
   assert.equal(state.view.busy, false);
+});
+
+test('link editor is a visible multiline text area', () => {
+  const { view } = harness();
+  assert.equal(view.connectionInput.tag, 'textarea');
+  assert.equal(view.connectionInput.attrs.type, undefined);
+  assert.ok(Number(view.connectionInput.attrs.rows) > 1);
+});
+
+test('ignored parameters appear below the link while typing and do not block saving', async () => {
+  const state = harness();
+  state.ignored = ['fm'];
+  state.view.connectionInput.value = 'vless://valid';
+  state.view.connectionInput.attrs.input();
+  assert.equal(state.view.connectionWarning.textContent, 'Ignored parameters (not applied): fm');
+  await state.view.handleConnection('save');
+  assert.equal(state.saved.length, 1);
+  assert.equal(state.view.connectionWarning.textContent, 'Ignored parameters (not applied): fm');
+  state.view.connectionInput.value = '';
+  state.view.connectionInput.attrs.input();
+  assert.equal(state.view.connectionWarning.textContent, '');
 });
 
 test('invalid link is rejected before RPC and failed saves keep the input', async () => {

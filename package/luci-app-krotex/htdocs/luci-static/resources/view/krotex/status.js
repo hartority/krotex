@@ -47,12 +47,34 @@ return view.extend({
 		}, this));
 	},
 
+	readConnection: function() {
+		try {
+			var result = vless.inspect(this.connectionInput.value);
+			this.connectionWarning.textContent = result.ignored.length
+				? _('Ignored parameters (not applied): %s').format(result.ignored.join(', ')) : '';
+			return result.profile;
+		}
+		catch (error) {
+			this.connectionWarning.textContent = error.message;
+			throw error;
+		}
+	},
+
+	handleConnectionInput: function() {
+		if (!this.connectionInput.value.trim()) {
+			this.connectionWarning.textContent = '';
+			return;
+		}
+		try { this.readConnection(); }
+		catch (error) { /* Validation errors are displayed below the link. */ }
+	},
+
 	handleConnection: function(action) {
 		if (this.busy)
 			return Promise.resolve();
 		var profile;
 		if (action === 'save') {
-			try { profile = vless.parse(this.connectionInput.value); }
+			try { profile = this.readConnection(); }
 			catch (error) {
 				ui.addNotification(null, E('p', {}, error.message));
 				return Promise.resolve();
@@ -67,8 +89,6 @@ return view.extend({
 					throw new Error(result.message || _('Connection operation failed.'));
 				this.connectionResult.textContent = action === 'save' ? _('Connection saved and applied.')
 					: _('Connection successful. Exit IP: %s').format(result.ip);
-				if (action === 'save')
-					this.connectionInput.value = '';
 			}, this)).catch(L.bind(function(error) {
 				this.connectionResult.textContent = error.message;
 				ui.addNotification(null, E('p', {}, error.message));
@@ -125,10 +145,12 @@ return view.extend({
 		this.buttons = [];
 		this.connectionSummary = E('p', {}, _('Loading connection…'));
 		this.connectionResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
-		this.connectionInput = E('input', {
-			'type': 'password', 'class': 'cbi-input-text', 'style': 'width:100%',
+		this.connectionWarning = E('p', { 'class': 'cbi-value-description', 'role': 'status', 'aria-live': 'polite' }, '');
+		this.connectionInput = E('textarea', {
+			'rows': 5, 'class': 'cbi-input-text', 'style': 'width:100%;resize:vertical;overflow-wrap:anywhere',
 			'placeholder': 'vless://…', 'autocomplete': 'off', 'spellcheck': 'false',
-			'aria-label': _('VLESS link'), 'disabled': !L.hasViewPermission()
+			'aria-label': _('VLESS link'), 'disabled': !L.hasViewPermission(),
+			'input': L.bind(this.handleConnectionInput, this)
 		});
 		var connectionButtons = [ [ 'save', _('Save and apply') ], [ 'test', _('Check connection') ] ].map(L.bind(function(action) {
 			var button = E('button', {
@@ -179,6 +201,7 @@ return view.extend({
 				this.connectionSummary,
 				E('p', {}, _('Paste a VLESS TCP link with TLS or REALITY. Saving applies the connection and restarts Xray.')),
 				this.connectionInput,
+				this.connectionWarning,
 				E('div', {}, connectionButtons),
 				this.connectionResult,
 				E('p', {}, _('The connection check sends an HTTPS request to api.ipify.org through this proxy.'))

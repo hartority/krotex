@@ -51,9 +51,29 @@ test('rejects malformed links and unsupported transport/security settings', () =
   const parser = loadModule();
   for (const value of ['invalid', prefix.replace(uuid, 'invalid') + 'security=tls',
     prefix + 'security=none', prefix + 'security=tls&type=ws', prefix + 'security=tls&headerType=http',
-    prefix + 'security=tls&security=reality', prefix + 'security=tls&allowInsecure=1',
+    prefix + 'security=tls&security=reality',
     prefix + 'security=tls&encryption=custom', prefix + 'security=tls&flow=unknown',
     prefix + 'security=reality&sni=example.com',
     prefix + 'security=reality&sni=example.com&pbk=' + 'A'.repeat(43) + '&sid=abc'])
     assert.throws(() => parser.parse(value), undefined, value);
+});
+
+test('unknown parameters produce warnings without blocking a valid connection', () => {
+  const parser = loadModule();
+  const extra = encodeURIComponent(JSON.stringify({ tcp: [{ type: 'fragment', settings: { length: '10-20', packets: '1-3', interval: '10-20' } }] }));
+  const link = prefix + 'security=reality&sni=proxy.example&fp=firefox&pbk=' + 'A'.repeat(43) + '&fm=' + extra;
+  const result = parser.inspect(link);
+  assert.deepEqual(Array.from(result.ignored), ['fm']);
+  assert.equal(result.profile.fingerprint, 'firefox');
+  assert.equal(result.profile.security, 'reality');
+  assert.equal(result.profile.short_id, '');
+  assert.equal(result.profile.fm, undefined);
+  assert.equal(parser.parse(link).address, 'proxy.example');
+});
+
+test('unknown values cannot inject markup into warnings and duplicates still fail', () => {
+  const parser = loadModule();
+  const result = parser.inspect(prefix + 'security=tls&futureOption=%3Cscript%3E');
+  assert.deepEqual(Array.from(result.ignored), ['futureOption']);
+  assert.throws(() => parser.parse(prefix + 'security=tls&fm=a&fm=b'), /Repeated VLESS parameter/);
 });
