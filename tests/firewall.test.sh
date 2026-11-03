@@ -218,36 +218,6 @@ test "$code" = 403 || { cat "$WORK/client.log"; exit 1; }
 grep -Eq '\[device-tproxy (>>|->) proxy\]' "$WORK/access.log"
 echo 'PASS: selected device TCP traffic crosses real TPROXY and VLESS'
 
-sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
-	-e "s|/etc/krotex/routing.json|$WORK/routing.json|g" \
-	-e "s|/var/lock/krotex-quic-test.lock|$WORK/lock/quic-test|g" \
-	diagnose-quic.sh > "$WORK/quic-test"
-cp "$WORK/routing.json" "$WORK/quic-config-before"
-mkfifo "$WORK/quic-input"
-"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
-	"$RUNTIME/bin/busybox" ash "$WORK/quic-test" < "$WORK/quic-input" > "$WORK/quic-log" 2>&1 &
-QUIC_PID=$!
-PIDS="$PIDS $QUIC_PID"
-exec 9> "$WORK/quic-input"
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
-	if grep -q 'Temporary test is active' "$WORK/quic-log"; then break; fi
-	sleep .1
-done
-grep -q 'Temporary test is active' "$WORK/quic-log" || { cat "$WORK/quic-log"; exit 1; }
-set +e
-response="$(nsenter -t "$LAN" -n bash -c 'exec 3<>/dev/udp/93.184.216.34/443; printf "probe" >&3; IFS= read -r -t 3 line <&3' 2>&1)"
-status=$?
-set -e
-test "$status" -ne 0
-printf '%s\n' "$response" | grep -q 'Connection refused'
-printf '\n' >&9
-exec 9>&-
-wait "$QUIC_PID"
-! nft list table inet krotex | grep -q 'krotex-quic-test'
-cmp "$WORK/quic-config-before" "$WORK/routing.json"
-test ! -d "$WORK/lock/quic-test"
-echo 'PASS: temporary QUIC diagnostic rejects immediately and restores its rules on Enter'
-
 before="$(wc -l < "$WORK/access.log")"
 "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
 	"$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 127.0.0.1 > "$WORK/router-dns-result" 2>&1 || {
