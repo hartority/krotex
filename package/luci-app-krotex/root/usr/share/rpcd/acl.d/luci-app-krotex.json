@@ -1,0 +1,15 @@
+{
+  "luci-app-krotex": {
+    "description": "Read Krotex status and control its service",
+    "read": {
+      "ubus": {
+        "krotex": ["status"]
+      }
+    },
+    "write": {
+      "ubus": {
+        "krotex": ["action"]
+      }
+    }
+  }
+}

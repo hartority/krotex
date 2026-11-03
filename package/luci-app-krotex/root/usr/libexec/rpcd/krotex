@@ -1,0 +1,76 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+
+INIT=/etc/init.d/krotex
+
+status() {
+	local services running=0 pid=0 enabled=0 available=1 memory=0 uptime=0
+	local age idle
+
+	# Query procd rather than looking for an arbitrary process named xray.
+	services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || available=0
+	if [ "$available" -eq 1 ] && json_load "$services" &&
+		json_select krotex && json_select instances && json_select main; then
+		json_get_var running running
+		json_get_var pid pid
+	fi
+	case "$pid" in ''|*[!0-9]*) pid=0 ;; esac
+	[ "$running" = 1 ] && [ "$pid" -gt 0 ] && [ -d "/proc/$pid" ] || {
+		running=0
+		pid=0
+	}
+	"$INIT" enabled >/dev/null 2>&1 && enabled=1
+
+	if [ "$running" -eq 1 ]; then
+		memory="$(awk '/^VmRSS:/ { print $2; exit }' "/proc/$pid/status" 2>/dev/null)"
+		# Linux exposes starttime in USER_HZ (100 on OpenWrt targets),
+		# independently of the kernel's CONFIG_HZ setting.
+		read -r age idle < /proc/uptime
+		uptime="$(awk -v now="${age%%.*}" '
+			{ sub(/^.*\) /, ""); age = int(now - $20 / 100); print (age > 0 ? age : 0) }
+		' "/proc/$pid/stat" 2>/dev/null)"
+	fi
+	case "$memory" in ''|*[!0-9]*) memory=0 ;; esac
+	case "$uptime" in ''|*[!0-9]*) uptime=0 ;; esac
+
+	json_init
+	json_add_boolean available "$available"
+	json_add_boolean running "$running"
+	json_add_boolean enabled "$enabled"
+	json_add_boolean installed "$([ -x /usr/bin/xray ] && echo 1 || echo 0)"
+	json_add_int pid "$pid"
+	json_add_int uptime "$uptime"
+	json_add_int memory_kib "$memory"
+	json_dump
+}
+
+action() {
+	local request action code
+	read -r request
+	json_load "$request" || return 2
+	json_get_var action action
+	case "$action" in
+		start|stop|restart|enable|disable) ;;
+		*) return 2 ;;
+	esac
+
+	# Never return command output as JSON or accept arbitrary init names.
+	"$INIT" "$action" >/dev/null 2>&1
+	code=$?
+	json_init
+	json_add_int code "$code"
+	json_dump
+}
+
+case "$1" in
+	list) echo '{"status":{},"action":{"action":"str"}}' ;;
+	call)
+		case "$2" in
+			status) status ;;
+			action) action ;;
+			*) exit 2 ;;
+		esac
+		;;
+	*) exit 2 ;;
+esac
