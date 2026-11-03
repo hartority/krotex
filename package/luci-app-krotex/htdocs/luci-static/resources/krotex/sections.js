@@ -140,6 +140,7 @@ return baseclass.extend({
 		this.controls = this.topControls.slice();
 		this.checkOutputs = Object.create(null);
 		this.refreshFallbackOptions();
+		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)' };
 		var cards = this.sections.map(L.bind(function(section, index) {
 			var actionRow;
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
@@ -253,7 +254,7 @@ return baseclass.extend({
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
 			if (actionRow) fields.push(actionRow);
-			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #8886;border-radius:6px;padding:1em;margin:1em 0' }, fields);
+			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #8886;border-radius:6px;padding:1em;margin:1em 0;background:' + backgrounds[section.mode] }, fields);
 		}, this));
 		this.cards.replaceChildren.apply(this.cards, cards.length ? cards : [ E('p', {}, _('No sections. Unmatched traffic goes directly.')) ]);
 		this.setState(this.externalBusy, this.available);
