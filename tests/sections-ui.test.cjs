@@ -31,6 +31,7 @@ function harness(writable=true){
   return state;
 }
 function controls(editor,label){return editor.controls.filter(c=>c.attrs['aria-label']===label);}
+function chooseMode(editor,index,value){controls(editor,'Section route')[index].attrs.change({target:{value}});}
 
 test('section editor restores the entire link, warnings and textbox height',async()=>{
   const {editor}=harness();await editor.load();
@@ -41,8 +42,8 @@ test('section editor restores the entire link, warnings and textbox height',asyn
 });
 test('section editor adds, orders and saves exclude/VPN1/VPN2 with one default',async()=>{
   const state=harness(),editor=state.editor;await editor.load();
-  editor.add('direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com\n# comment\n';editor.move(1,-1);
-  editor.add('proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';
+  editor.add();chooseMode(editor,1,'direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com\n# comment\n';editor.move(1,-1);
+  editor.add();chooseMode(editor,2,'proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';
   controls(editor,'Use for unmatched traffic')[2].attrs.change({target:{checked:true}});
   assert.deepEqual(Array.from(editor.sections,s=>s.fallback),[false,false,true]);
   await editor.save();
@@ -71,10 +72,39 @@ test('disabled default is cleared; removal leaves the remaining section in place
   const {editor}=harness();await editor.load();
   controls(editor,'Enable section')[0].attrs.change({target:{checked:false}});
   assert.equal(editor.sections[0].enabled,false);assert.equal(editor.sections[0].fallback,false);
-  editor.add('direct');editor.remove(0);assert.equal(editor.sections.length,1);assert.equal(editor.sections[0].mode,'direct');
+  editor.add();chooseMode(editor,1,'direct');editor.remove(0);assert.equal(editor.sections.length,1);assert.equal(editor.sections[0].mode,'direct');
 });
 test('read-only users can view sections but cannot edit or save them',async()=>{
   const state=harness(false),editor=state.editor;await editor.load();
-  assert.ok(editor.controls.every(c=>c.disabled));editor.add('direct');editor.remove(0);await editor.save();
+  assert.ok(editor.controls.every(c=>c.disabled));editor.add();editor.remove(0);await editor.save();
   assert.equal(editor.sections.length,1);assert.equal(state.saved.length,0);
+});
+
+test('new sections remain unconfigured and inactive across saving and reopening',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();editor.add();
+  assert.equal(editor.sections[1].mode,'unconfigured');
+  assert.equal(editor.sections[1].enabled,false);
+  assert.equal(controls(editor,'Section route')[1].value,'unconfigured');
+  assert.equal(controls(editor,'Enable section')[1].disabled,true);
+  await editor.save();
+  assert.equal(state.saved[0][1].mode,'unconfigured');
+  assert.equal(editor.sections[1].mode,'unconfigured');
+  chooseMode(editor,1,'direct');
+  assert.equal(editor.sections[1].enabled,true);
+  assert.equal(controls(editor,'Enable section')[1].disabled,false);
+});
+
+test('route selector and VLESS field stay consistent when changing types repeatedly',async()=>{
+  const {editor}=harness();await editor.load();
+  chooseMode(editor,0,'direct');
+  assert.equal(controls(editor,'Section route')[0].value,'direct');
+  assert.equal(controls(editor,'VLESS link').length,0);
+  chooseMode(editor,0,'proxy');
+  assert.equal(controls(editor,'Section route')[0].value,'proxy');
+  assert.equal(controls(editor,'VLESS link')[0].value,link);
+  chooseMode(editor,0,'unconfigured');
+  assert.equal(editor.sections[0].enabled,false);
+  assert.equal(editor.sections[0].fallback,false);
+  chooseMode(editor,0,'proxy');
+  assert.equal(controls(editor,'VLESS link')[0].value,link);
 });

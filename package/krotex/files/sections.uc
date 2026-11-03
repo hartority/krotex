@@ -88,8 +88,10 @@ function normalize(input) {
 		ids[id] = true;
 		let name = trim(text(item.name, 128, 'section name'));
 		check(length(name), 'Enter a section name.');
-		check(item.mode == 'direct' || item.mode == 'proxy', 'Invalid section mode.');
+		check(item.mode == 'direct' || item.mode == 'proxy' || item.mode == 'unconfigured', 'Invalid section mode.');
 		check(type(item.enabled) == 'bool' && type(item.fallback) == 'bool', 'Invalid section state.');
+		if (item.mode == 'unconfigured')
+			check(!item.enabled && !item.fallback, 'Choose a section type before enabling it.');
 		if (item.fallback) {
 			check(item.enabled, 'The default section must be enabled.');
 			check(++defaults == 1, 'Only one section can handle unmatched traffic.');

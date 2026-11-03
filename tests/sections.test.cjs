@@ -80,3 +80,15 @@ test('section compiler: rejects ambiguous defaults, injected rules, malformed do
   assert.equal(config.routing.rules.find(r=>r.domain).outboundTag,'direct');
   assert.equal(config.krotex_sections[0].routing,undefined);
 });
+
+test('unconfigured sections persist without producing routes, outbounds or a default', {skip:!runtime}, () => {
+  const draft={...section('draft','unconfigured',['example.com']),enabled:false};
+  const config=run('compile',[draft,section('vpn1','proxy',['youtube.com'])]);
+  assert.equal(config.krotex_sections[0].mode,'unconfigured');
+  assert.equal(run('read',[],config).sections[0].enabled,false);
+  assert.equal(config.routing.rules.some(r=>r.domain?.includes('domain:example.com')),false);
+  assert.equal(config.outbounds.some(o=>o.tag==='section-draft'),false);
+  assert.equal(config.routing.rules.at(-1).outboundTag,'direct');
+  assert.throws(()=>run('compile',[{...draft,enabled:true}]));
+  assert.throws(()=>run('compile',[{...draft,fallback:true}]));
+});

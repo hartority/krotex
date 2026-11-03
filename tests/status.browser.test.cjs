@@ -20,8 +20,9 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         const element = document.createElement(tag);
         for (const [key,value] of Object.entries(attrs || {})) {
           if (typeof value === 'function') element.addEventListener(key, value);
-          else if (['disabled','checked','selected'].includes(key)) element[key] = value;
-          else element.setAttribute(key,value);
+          // LuCI dom.attr() stringifies booleans as attributes too. In
+          // particular selected="false" still selects an HTML option.
+          else if (value != null) element.setAttribute(key, typeof value === 'object' ? JSON.stringify(value) : value);
         }
         if (children != null) element.append(...(Array.isArray(children) ? children : [children]));
         return element;
@@ -58,14 +59,42 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(input.scrollHeight<=input.clientHeight+2,'textbox clips saved link');
           check(input.clientHeight>500,'long link was not expanded');
           const editor=page.sectionsEditor;
-          editor.add('direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com';editor.move(1,-1);
-          editor.add('proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';editor.renderCards();
+          const card=(index)=>editor.cards.children[index];
+          const route=(index)=>card(index).querySelector('select[aria-label="Section route"]');
+          const choose=(index,value)=>{route(index).value=value;route(index).dispatchEvent(new Event('change'));};
+          check(route(0).value==='proxy','saved proxy is displayed with the wrong type');
+          choose(0,'direct');
+          check(route(0).value==='direct'&&!card(0).querySelector('textarea[aria-label="VLESS link"]'),'type and VLESS field disagree');
+          choose(0,'proxy');
+          check(route(0).value==='proxy'&&card(0).querySelector('textarea[aria-label="VLESS link"]').value===link,'cannot switch back to Xray');
+          check(editor.topControls.length===2,'there must be one add button and one save button');
+          editor.topControls[0].click();
+          check(route(1).value==='unconfigured'&&!editor.sections[1].enabled,'new section has a configured route');
+          check(card(1).querySelector('input[aria-label="Enable section"]').disabled,'unconfigured section can be enabled');
+          await editor.save();
+          check(route(1).value==='unconfigured','unconfigured section did not survive reopening');
+          choose(1,'direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com';editor.move(1,-1);
+          check(editor.cards.children[0].querySelector('select[aria-label="Section route"]').value==='direct','Direct section is displayed as Xray');
+          editor.add();choose(2,'proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';editor.renderCards();
+          check(!editor.cards.querySelector('strong'),'duplicate section heading remains');
+          const nameInput=card(2).querySelector('input[aria-label="Section name"]');
+          const remove=card(2).querySelector('button[aria-label="Remove section"]');
+          check(nameInput.parentElement===remove.parentElement,'name and action buttons are on different rows');
+          check(Math.abs(nameInput.getBoundingClientRect().y-remove.getBoundingClientRect().y)<12,'name and buttons do not line up');
           const fallback=editor.cards.children[2].querySelector('input[aria-label="Use for unmatched traffic"]');
           fallback.checked=true;fallback.dispatchEvent(new Event('change'));
           await editor.save();
           check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
           check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
           check(saved[2].profile.url===link,'section link was not retained');
+          check(card(0).querySelector('input[aria-label="Use for unmatched traffic"]').checked===false,'false checkbox attribute enabled the direct default');
+          check(card(2).querySelector('input[aria-label="Use for unmatched traffic"]').checked===true,'default checkbox does not match the model');
+          document.body.style.width='1000px';
+          check(page.statsPanel.getBoundingClientRect().height<100,'desktop statistics are too tall');
+          check(page.statsPanel.querySelectorAll('dt').length===7,'statistics lost a metric');
+          document.body.style.width='320px';
+          check(page.statsPanel.scrollWidth<=page.statsPanel.clientWidth+2,'statistics overflow on mobile');
+          check(page.statsPanel.getBoundingClientRect().height<240,'mobile statistics are too tall');
           page.deviceSelect.value=mac1;
           page.deviceSelect.dispatchEvent(new Event('change'));
           await pause();

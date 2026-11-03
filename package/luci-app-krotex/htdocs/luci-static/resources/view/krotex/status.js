@@ -196,20 +196,24 @@ return view.extend({
 		}, _('Refresh devices'));
 		this.buttons.push(refreshDevices);
 		var rows = [
-			[ 'status', _('Xray-core status') ],
-			[ 'core_version', _('Xray-core version') ],
-			[ 'enabled', _('Start on boot') ],
-			[ 'pid', _('Process ID') ],
-			[ 'uptime', _('Process uptime') ],
-			[ 'memory', _('Resident memory') ],
-			[ 'updated', _('Last update') ]
+			[ 'status', _('Status') ],
+			[ 'core_version', _('Xray version') ],
+			[ 'enabled', _('Autostart') ],
+			[ 'pid', _('PID') ],
+			[ 'uptime', _('Uptime') ],
+			[ 'memory', _('Memory') ],
+			[ 'updated', _('Updated') ]
 		].map(L.bind(function(row) {
 			this.fields[row[0]] = E('span', {}, '—');
-			return E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title' }, row[1]),
-				E('div', { 'class': 'cbi-value-field' }, this.fields[row[0]])
+			return E('div', { 'style': 'min-width:0' }, [
+				E('dt', { 'style': 'display:block;float:none;font-size:.85em;opacity:.75;margin:0 0 .2em' }, row[1]),
+				E('dd', { 'style': 'display:block;float:none;margin:0;font-weight:600;font-variant-numeric:tabular-nums' }, this.fields[row[0]])
 			]);
 		}, this));
+		this.statsPanel = E('dl', {
+			'class': 'cbi-section', 'aria-label': _('Service statistics'), 'title': _('Status refreshes every 5 seconds.'),
+			'style': 'display:grid;grid-template-columns:repeat(auto-fit,minmax(7.5em,1fr));gap:.6em .8em;padding:.75em 1em;margin:.5em 0 .75em;border:1px solid #8884;border-radius:6px'
+		}, rows);
 
 		var actions = [
 			[ 'start', _('Start') ],
@@ -233,8 +237,7 @@ return view.extend({
 		});
 		var page = E('div', {}, [
 			E('h2', {}, _('Krotex')),
-			E('p', {}, _('Service status refreshes every 5 seconds.')),
-			E('div', { 'class': 'cbi-section' }, rows),
+			this.statsPanel,
 			E('div', { 'class': 'cbi-section' }, actions),
 			this.sectionsEditor.render(),
 			E('div', { 'class': 'cbi-section' }, [

@@ -403,3 +403,19 @@ printf '{"enabled":true,"mac":"02:11:22:33:44:55"}\n' > "$WORK/request"
 call_routing set_routing
 expect_code 0
 echo 'PASS: devices can use domain sections with a direct-only default and no VPN'
+
+sections='[{"id":"draft","name":"New section","mode":"unconfigured","enabled":false,"fallback":false,"domains":[]}]'
+section_request
+call_sections save_sections
+expect_code 0
+call_sections sections
+json_load "$(cat "$WORK/result")"
+json_select sections; json_select 1
+json_get_var mode mode
+json_get_var enabled enabled
+test "$mode" = unconfigured
+test "$enabled" = 0
+printf '{"id":"draft"}\n' > "$WORK/request"
+call_sections test_section
+expect_code 1
+echo 'PASS: an unconfigured section saves and reopens without creating a usable VPN route'
