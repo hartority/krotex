@@ -134,8 +134,9 @@ if [ -n "$PREPARE" ]; then
 	NEW=
 	exit 0
 fi
-set -- run -test -config "$SYSROOT/etc/krotex/config.json"
+set -- run -test
 [ ! -r "$SYSROOT/usr/share/krotex/transparent.json" ] || set -- "$@" -config "$SYSROOT/usr/share/krotex/transparent.json"
+set -- "$@" -config "$SYSROOT/etc/krotex/config.json"
 "$NEW" "$@" || die 'The new core rejected the current configuration.'
 if running; then WAS_RUNNING=1; else
 	[ "$?" -eq 1 ] || die 'Unable to query procd.'

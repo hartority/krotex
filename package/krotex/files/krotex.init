@@ -13,10 +13,12 @@ start_service() {
 	[ -x "$PROG" ] && [ -r "$CONF" ] && [ -r "$TRANSPARENT" ] || return 1
 
 	# Reject invalid configuration before registering a respawning instance.
-	"$PROG" run -test -config "$CONF" -config "$TRANSPARENT" || return 1
+	# Xray replaces the routing object when merging configs. Load the defaults
+	# first, so the compiled section rules take precedence.
+	"$PROG" run -test -config "$TRANSPARENT" -config "$CONF" || return 1
 
 	procd_open_instance main
-	procd_set_param command "$PROG" run -config "$CONF" -config "$TRANSPARENT"
+	procd_set_param command "$PROG" run -config "$TRANSPARENT" -config "$CONF"
 	procd_set_param file "$CONF" "$TRANSPARENT"
 	procd_set_param respawn 3600 5 5
 	procd_set_param stdout 1

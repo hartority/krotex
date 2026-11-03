@@ -1,0 +1,90 @@
+#!/bin/sh
+. /usr/share/libubox/jshn.sh
+_json_no_warning=1
+CONFIG=/etc/krotex/config.json
+COMPILER=/usr/share/krotex/sections.uc
+INIT=/etc/init.d/krotex
+PROG=/usr/bin/xray
+[ ! -x /usr/libexec/krotex/xray ] || PROG=/usr/libexec/krotex/xray
+LOCK=/var/lock/krotex-setup.lock
+WORK=
+LOCKED=0
+CHANGED=0
+WAS_RUNNING=0
+
+reply() {
+	json_init
+	json_add_int code "$1"
+	json_add_string message "$2"
+	json_dump
+}
+fail() { reply 1 "$1"; exit 0; }
+cleanup() {
+	if [ "$CHANGED" -eq 1 ]; then
+		"$INIT" stop >/dev/null 2>&1
+		if mv "$WORK/previous.json" "$CONFIG"; then
+			[ "$WAS_RUNNING" -eq 0 ] || "$INIT" start >/dev/null 2>&1
+		else
+			printf '[Krotex] Recovery retained at %s\n' "$WORK/previous.json" >&2
+			WORK=
+		fi
+	fi
+	[ -z "$WORK" ] || rm -rf "$WORK"
+	[ "$LOCKED" -eq 0 ] || rmdir "$LOCK"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+if [ "$1" = sections ]; then
+	ucode "$COMPILER" read "$CONFIG" || reply 1 'Unable to read sections.'
+	exit 0
+fi
+case "$1" in save_sections|test_section) ;; *) exit 2 ;; esac
+mkdir "$LOCK" 2>/dev/null || fail 'Another Krotex operation is running.'
+LOCKED=1
+umask 077
+WORK="$(mktemp -d /etc/krotex/.sections.XXXXXX)" || fail 'Unable to create temporary files.'
+head -c 262145 > "$WORK/request.json"
+[ "$(wc -c < "$WORK/request.json")" -le 262144 ] || fail 'Section settings are too large.'
+if [ "$1" = test_section ]; then
+	services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || fail 'Unable to query procd.'
+	json_load "$services" && json_select krotex && json_select instances && json_select main || fail 'Start Krotex before checking a section.'
+	json_get_var active running
+	[ "$active" = 1 ] || fail 'Start Krotex before checking a section.'
+	ucode "$COMPILER" check "$CONFIG" "$WORK/request.json" > "$WORK/check.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+	json_load "$(cat "$WORK/check.json")" || fail 'Invalid connection check.'
+	json_get_var port port
+	case "$port" in ''|*[!0-9]*) fail 'Invalid connection check.' ;; esac
+	[ "$port" -ge 11080 ] && [ "$port" -le 11111 ] || fail 'Invalid connection check.'
+	result="$(curl --silent --show-error --fail --noproxy '' --proxy "socks5h://127.0.0.1:$port" --connect-timeout 5 --max-time 12 --proto '=https' https://api.ipify.org 2> "$WORK/error")" || fail "The HTTPS request through this section failed. $(head -c 512 "$WORK/error")"
+	case "$result" in ''|*[!0-9a-fA-F:.]*) fail 'The IP check returned an unexpected response.' ;; esac
+	json_init
+	json_add_int code 0
+	json_add_string ip "$result"
+	json_dump
+	exit 0
+fi
+ucode "$COMPILER" compile "$CONFIG" "$WORK/request.json" > "$WORK/new.json" 2> "$WORK/error" || fail "$(head -c 512 "$WORK/error")"
+"$PROG" run -test -config /usr/share/krotex/transparent.json -config "$WORK/new.json" > "$WORK/validation" 2>&1 || fail 'Xray rejected the sections. Check the connection settings.'
+services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || fail 'Unable to query procd.'
+json_load "$services" || fail 'Unable to query procd.'
+if json_select krotex && json_select instances && json_select main; then
+	json_get_var active running
+	[ "$active" != 1 ] || WAS_RUNNING=1
+fi
+cp "$CONFIG" "$WORK/previous.json" || fail 'Unable to back up the configuration.'
+mv "$WORK/new.json" "$CONFIG" || fail 'Unable to save sections.'
+CHANGED=1
+"$INIT" restart > "$WORK/start" 2>&1 || fail 'Xray failed to start; restoring the previous sections.'
+ready=0
+for attempt in 1 2 3 4 5; do
+	sleep 1
+	services="$(ubus -t 3 call service list '{"name":"krotex"}' 2>/dev/null)" || continue
+	if json_load "$services" && json_select krotex && json_select instances && json_select main; then
+		json_get_var active running
+		if [ "$active" = 1 ]; then ready=1; break; fi
+	fi
+done
+[ "$ready" -eq 1 ] || fail 'Xray did not start; restoring the previous sections.'
+CHANGED=0
+reply 0 'Sections saved and applied.'

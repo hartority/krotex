@@ -7,11 +7,12 @@ const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { test } = require('node:test');
 
-test('saved VLESS link is fully visible and two devices can be added and removed in Chromium', () => {
+test('sections, full VLESS links and multiple devices work in Chromium', () => {
   const work = mkdtempSync(join(tmpdir(), 'krotex-browser-'));
   try {
     const view = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/view/krotex/status.js'), 'utf8');
     const vless = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/vless.js'), 'utf8');
+    const sections = readFileSync(resolve(__dirname, '../package/luci-app-krotex/htdocs/luci-static/resources/krotex/sections.js'), 'utf8');
     const html = `<!doctype html><meta charset="utf-8"><style>body{width:420px;font:16px sans-serif}textarea{font:14px monospace}</style><script>
       const _ = value => value;
       String.prototype.format = function(...args) { let i=0; return this.replace(/%s|%\\.1f/g, () => String(args[i++])); };
@@ -19,7 +20,7 @@ test('saved VLESS link is fully visible and two devices can be added and removed
         const element = document.createElement(tag);
         for (const [key,value] of Object.entries(attrs || {})) {
           if (typeof value === 'function') element.addEventListener(key, value);
-          else if (key === 'disabled') element.disabled = value;
+          else if (['disabled','checked','selected'].includes(key)) element[key] = value;
           else element.setAttribute(key,value);
         }
         if (children != null) element.append(...(Array.isArray(children) ? children : [children]));
@@ -33,14 +34,17 @@ test('saved VLESS link is fully visible and two devices can be added and removed
       const link = 'vless://11111111-2222-4333-8444-555555555555@proxy.example:443?security=tls&sni=example.com&fm=' + 'a'.repeat(1800) + '#Saved%20name';
       const mac1 = '02:11:22:33:44:55', mac2 = '02:aa:bb:cc:dd:ee';
       let macs = [];
+      let saved = [{id:'vpn1',name:'VPN 1',mode:'proxy',enabled:true,fallback:true,domains:[],profile:{url:link}}];
       const rpc = { declare:spec=>async(mac,enabled)=> {
         if(spec.method==='status') return {available:true,installed:true,running:true};
-        if(spec.method==='connection') return {configured:true,link,address:'proxy.example',port:443,security:'tls'};
+        if(spec.method==='sections') return {sections:saved};
+        if(spec.method==='save_sections') { saved=JSON.parse(mac);return {code:0}; }
         if(spec.method==='devices') return {devices:[{mac:mac1,name:'Laptop',address:'192.168.1.10'}]};
         if(spec.method==='routing') return {macs:macs.slice(),enabled:!!macs.length,active:!!macs.length};
         if(spec.method==='set_routing') { macs=macs.filter(item=>item!==mac); if(enabled)macs.push(mac); return {code:0}; }
         return {code:0};
       }};
+      const sections = new ((function(){${sections}\n})())();
       const view = { extend: value=>value };
       const page = (function(){${view}\n})();
       const pause = () => new Promise(resolve=>setTimeout(resolve,50));
@@ -49,9 +53,19 @@ test('saved VLESS link is fully visible and two devices can be added and removed
         try {
           document.body.append(page.render(await page.load()));
           await pause();
-          check(page.connectionInput.value===link,'saved link is incomplete');
-          check(page.connectionInput.scrollHeight<=page.connectionInput.clientHeight+2,'textbox clips saved link: scroll='+page.connectionInput.scrollHeight+' client='+page.connectionInput.clientHeight);
-          check(page.connectionInput.clientHeight>500,'long link was not expanded');
+          const input=document.querySelector('textarea[aria-label="VLESS link"]');
+          check(input.value===link,'saved link is incomplete');
+          check(input.scrollHeight<=input.clientHeight+2,'textbox clips saved link');
+          check(input.clientHeight>500,'long link was not expanded');
+          const editor=page.sectionsEditor;
+          editor.add('direct');editor.sections[1].name='exclude';editor.sections[1].domains='example.com';editor.move(1,-1);
+          editor.add('proxy');editor.sections[2].url=link;editor.sections[2].name='VPN 2';editor.renderCards();
+          const fallback=editor.cards.children[2].querySelector('input[aria-label="Use for unmatched traffic"]');
+          fallback.checked=true;fallback.dispatchEvent(new Event('change'));
+          await editor.save();
+          check(saved.length===3&&saved[0].name==='exclude'&&saved[2].name==='VPN 2','section order was lost');
+          check(saved[2].fallback&&!saved[1].fallback,'default section selection was lost');
+          check(saved[2].profile.url===link,'section link was not retained');
           page.deviceSelect.value=mac1;
           page.deviceSelect.dispatchEvent(new Event('change'));
           await pause();

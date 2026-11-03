@@ -222,11 +222,17 @@ generate() {
 save() {
 	read_profile
 	acquire_lock
+	if json_load "$(cat "$CONFIG" 2>/dev/null)"; then
+		local sections_type
+		json_get_type sections_type krotex_sections
+		[ "$sections_type" != array ] || fail 'Edit VLESS connections in their sections.'
+	fi
 	umask 077
 	WORK="$(mktemp -d /etc/krotex/.apply.XXXXXX)" || fail 'Unable to create temporary files.'
 	generate > "$WORK/config.json" || fail 'Unable to generate Xray configuration.'
-	set -- run -test -config "$WORK/config.json"
+	set -- run -test
 	[ ! -r /usr/share/krotex/transparent.json ] || set -- "$@" -config /usr/share/krotex/transparent.json
+	set -- "$@" -config "$WORK/config.json"
 	"$PROG" "$@" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
 	if running; then WAS_RUNNING=1; else
 		[ "$?" -eq 1 ] || fail 'Unable to query procd.'
@@ -248,6 +254,11 @@ save() {
 
 test_connection() {
 	acquire_lock
+	if json_load "$(cat "$CONFIG" 2>/dev/null)"; then
+		local sections_type
+		json_get_type sections_type krotex_sections
+		[ "$sections_type" != array ] || fail 'The connection check is available for legacy connections only.'
+	fi
 	# Refuse to label the initial direct-only SOCKS listener as a working proxy.
 	local protocol tag result curl_code detail
 	json_load "$(cat "$CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'

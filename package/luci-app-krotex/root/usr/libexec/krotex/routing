@@ -136,10 +136,14 @@ save() {
 	fi
 	MACS=$updated
 	if [ "$enabled" = 1 ]; then
-		json_load "$(cat "$CORE_CONFIG" 2>/dev/null)" && json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
-		json_get_var protocol protocol
-		json_get_var tag tag
-		[ "$protocol" = vless ] && [ "$tag" = proxy ] || fail 'Configure a VLESS connection first.'
+		json_load "$(cat "$CORE_CONFIG" 2>/dev/null)" || fail 'Configure a connection or sections first.'
+		json_get_type kind krotex_sections
+		if [ "$kind" != array ]; then
+			json_select outbounds && json_select 1 || fail 'Configure a VLESS connection first.'
+			json_get_var protocol protocol
+			json_get_var tag tag
+			[ "$protocol" = vless ] && [ "$tag" = proxy ] || fail 'Configure a VLESS connection first.'
+		fi
 		[ -f /var/run/krotex/routing-service-active ] || fail 'Start Krotex before enabling device routing.'
 	fi
 	umask 077

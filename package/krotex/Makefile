@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=krotex
-PKG_VERSION:=0.4.0
+PKG_VERSION:=0.5.0
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 
@@ -11,7 +11,7 @@ define Package/krotex
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Krotex service
-  DEPENDS:=+xray-core +jshn +ubus +firewall4 +nftables-json +ip-full +kmod-nft-tproxy
+  DEPENDS:=+xray-core +jshn +ubus +firewall4 +nftables-json +ip-full +kmod-nft-tproxy +ucode +ucode-mod-fs
   PKGARCH:=all
 endef
 
@@ -35,6 +35,7 @@ define Package/krotex/install
 	$(INSTALL_DIR) $(1)/usr/libexec/krotex $(1)/usr/share/krotex $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/firewall.sh $(1)/usr/libexec/krotex/firewall
 	$(INSTALL_DATA) ./files/transparent.json $(1)/usr/share/krotex/transparent.json
+	$(INSTALL_DATA) ./files/sections.uc $(1)/usr/share/krotex/sections.uc
 	$(INSTALL_BIN) ./files/40-krotex-routing $(1)/etc/uci-defaults/40-krotex-routing
 endef
 

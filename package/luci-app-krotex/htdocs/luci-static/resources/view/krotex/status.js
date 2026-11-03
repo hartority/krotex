@@ -3,7 +3,7 @@
 'require rpc';
 'require poll';
 'require ui';
-'require krotex.vless as vless';
+'require krotex.sections as sections';
 
 var callStatus = rpc.declare({
 	object: 'krotex',
@@ -18,9 +18,6 @@ var callAction = rpc.declare({
 	expect: { '': {} }
 });
 
-var callConnection = rpc.declare({ object: 'krotex', method: 'connection', expect: { '': {} } });
-var callSaveConnection = rpc.declare({ object: 'krotex', method: 'save_connection', params: [ 'profile' ], expect: { '': {} } });
-var callTestConnection = rpc.declare({ object: 'krotex', method: 'test_connection', expect: { '': {} } });
 var callDevices = rpc.declare({ object: 'krotex', method: 'devices', expect: { '': {} } });
 var callRouting = rpc.declare({ object: 'krotex', method: 'routing', expect: { '': {} } });
 var callSetRouting = rpc.declare({ object: 'krotex', method: 'set_routing', params: [ 'mac', 'enabled' ], expect: { '': {} } });
@@ -120,79 +117,6 @@ return view.extend({
 		}, this));
 	},
 
-	refreshConnection: function() {
-		return callConnection().then(L.bind(function(data) {
-			this.connectionSummary.textContent = data.configured
-				? '%s:%s · %s'.format(data.address, data.port, data.security.toUpperCase())
-				: _('No VLESS connection configured');
-			if (!this.connectionEdited && data.configured) {
-				this.connectionInput.value = data.link || (data.profile ? vless.format(data.profile) : '');
-				this.handleConnectionInput(false);
-			}
-		}, this)).catch(L.bind(function() {
-			this.connectionSummary.textContent = _('Connection settings unavailable');
-		}, this));
-	},
-
-	readConnection: function() {
-		try {
-			var result = vless.inspect(this.connectionInput.value);
-			this.connectionWarning.textContent = result.ignored.length
-				? _('Ignored parameters (not applied): %s').format(result.ignored.join(', ')) : '';
-			result.profile.url = this.connectionInput.value.trim();
-			return result.profile;
-		}
-		catch (error) {
-			this.connectionWarning.textContent = error.message;
-			throw error;
-		}
-	},
-
-	handleConnectionInput: function(edited) {
-		if (edited !== false) this.connectionEdited = true;
-		setTimeout(L.bind(function() {
-			this.connectionInput.style.height = 'auto';
-			var border = (this.connectionInput.offsetHeight || 0) - (this.connectionInput.clientHeight || 0);
-			this.connectionInput.style.height = Math.max(120, this.connectionInput.scrollHeight + border) + 'px';
-		}, this), 0);
-		if (!this.connectionInput.value.trim()) {
-			this.connectionWarning.textContent = '';
-			return;
-		}
-		try { this.readConnection(); }
-		catch (error) { /* Validation errors are displayed below the link. */ }
-	},
-
-	handleConnection: function(action) {
-		if (this.busy)
-			return Promise.resolve();
-		var profile;
-		if (action === 'save') {
-			try { profile = this.readConnection(); }
-			catch (error) {
-				ui.addNotification(null, E('p', {}, error.message));
-				return Promise.resolve();
-			}
-		}
-		this.busy = true;
-		this.updateStatus(this.lastStatus);
-		this.connectionResult.textContent = action === 'save' ? _('Applying connection…') : _('Checking connection…');
-		return (action === 'save' ? callSaveConnection(JSON.stringify(profile)) : callTestConnection())
-			.then(L.bind(function(result) {
-				if (result.code !== 0)
-					throw new Error(result.message || _('Connection operation failed.'));
-				this.connectionResult.textContent = action === 'save' ? _('Connection saved and applied.')
-					: _('Connection successful. Exit IP: %s').format(result.ip);
-				if (action === 'save') this.connectionEdited = false;
-			}, this)).catch(L.bind(function(error) {
-				this.connectionResult.textContent = error.message;
-				ui.addNotification(null, E('p', {}, error.message));
-			}, this)).then(L.bind(function() {
-				this.busy = false;
-				return Promise.all([ this.refresh(), this.refreshConnection() ]);
-			}, this));
-	},
-
 	updateStatus: function(data) {
 		this.lastStatus = data;
 		var available = data.available === true;
@@ -217,9 +141,9 @@ return view.extend({
 		this.buttons.concat(this.routingRemoveButtons || []).forEach(L.bind(function(button) {
 			button.disabled = !!this.busy || !available || !L.hasViewPermission();
 		}, this));
-		this.connectionInput.disabled = !!this.busy || !available || !L.hasViewPermission();
-		this.routingMac.disabled = this.connectionInput.disabled;
-		this.deviceSelect.disabled = this.connectionInput.disabled;
+		this.routingMac.disabled = !!this.busy || !available || !L.hasViewPermission();
+		this.deviceSelect.disabled = this.routingMac.disabled;
+		if (this.sectionsEditor) this.sectionsEditor.setState(!!this.busy, available);
 	},
 
 	handleAction: function(action) {
@@ -244,7 +168,6 @@ return view.extend({
 		this.routingMacs = [];
 		this.devices = [];
 		this.routingList = E('ul', { 'style': 'list-style:none;padding:0' }, []);
-		this.connectionEdited = false;
 		this.routingSummary = E('p', {}, _('Loading device routing…'));
 		this.routingResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.routingMac = E('input', {
@@ -272,23 +195,6 @@ return view.extend({
 			'click': ui.createHandlerFn(this, 'refreshDevices')
 		}, _('Refresh devices'));
 		this.buttons.push(refreshDevices);
-		this.connectionSummary = E('p', {}, _('Loading connection…'));
-		this.connectionResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
-		this.connectionWarning = E('p', { 'class': 'cbi-value-description', 'role': 'status', 'aria-live': 'polite' }, '');
-		this.connectionInput = E('textarea', {
-			'rows': 5, 'wrap': 'soft', 'class': 'cbi-input-text', 'style': 'width:100%;resize:vertical;overflow-wrap:anywhere;box-sizing:border-box',
-			'placeholder': 'vless://…', 'autocomplete': 'off', 'spellcheck': 'false',
-			'aria-label': _('VLESS link'), 'disabled': !L.hasViewPermission(),
-			'input': L.bind(this.handleConnectionInput, this)
-		});
-		var connectionButtons = [ [ 'save', _('Save and apply') ], [ 'test', _('Check connection') ] ].map(L.bind(function(action) {
-			var button = E('button', {
-				'class': 'btn cbi-button-action', 'style': 'margin:.5em .5em .5em 0',
-				'click': ui.createHandlerFn(this, 'handleConnection', action[0])
-			}, action[1]);
-			this.buttons.push(button);
-			return button;
-		}, this));
 		var rows = [
 			[ 'status', _('Xray-core status') ],
 			[ 'core_version', _('Xray-core version') ],
@@ -321,36 +227,30 @@ return view.extend({
 			return button;
 		}, this));
 
+		this.sectionsEditor = sections.create({
+			onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this),
+			onApplied: L.bind(this.refresh, this)
+		});
 		var page = E('div', {}, [
 			E('h2', {}, _('Krotex')),
 			E('p', {}, _('Service status refreshes every 5 seconds.')),
 			E('div', { 'class': 'cbi-section' }, rows),
 			E('div', { 'class': 'cbi-section' }, actions),
-			E('div', { 'class': 'cbi-section' }, [
-				E('h3', {}, _('VLESS connection')),
-				this.connectionSummary,
-				E('p', {}, _('Paste a VLESS TCP link with TLS or REALITY. Saving applies the connection and restarts Xray.')),
-				this.connectionInput,
-				this.connectionWarning,
-				E('div', {}, connectionButtons),
-				this.connectionResult,
-				E('p', {}, _('The connection check sends an HTTPS request to api.ipify.org through this proxy.'))
-			]),
+			this.sectionsEditor.render(),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Device routing')),
 				this.routingSummary,
-				E('p', {}, _('Select a device to add it, or enter its MAC address and click Add device. Added devices use the proxy for public IPv4 TCP and UDP traffic. Local IPv4 networks and router access remain direct.')),
+				E('p', {}, _('Select a device to add it, or enter its MAC address and click Add device. Added devices follow the routing sections for public IPv4 TCP and UDP traffic. Local IPv4 networks and router access remain direct.')),
 				E('div', {}, [ this.deviceSelect, refreshDevices ]),
 				E('div', {}, this.routingMac),
 				E('div', {}, routingButtons),
 				this.routingList,
 				this.routingResult,
-				E('p', {}, _('DNS is sent through the proxy to 1.1.1.1; local DHCP hostnames may not resolve. Public IPv6 and IPv6 DNS are blocked for added devices to prevent bypass.')),
+				E('p', {}, _('DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when no Xray sections are enabled. Local DHCP hostnames may not resolve. Public IPv6 and IPv6 DNS are blocked for added devices to prevent bypass.')),
 				E('p', {}, _('Reconnect devices after adding them. Removing a device or stopping Krotex restores direct access.'))
 			])
 		]);
 		this.updateStatus(data);
-		this.refreshConnection();
 		this.refreshRouting();
 		this.refreshDevices();
 		poll.add(L.bind(this.refresh, this), 5);

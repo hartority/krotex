@@ -124,11 +124,13 @@ fi
 CORE="$SOURCE/package/krotex/files"
 LUCI="$SOURCE/package/luci-app-krotex"
 for path in "$SOURCE/update-core.sh" "$CORE/krotex.init" "$CORE/config.json" \
-	"$CORE/routing.json" "$CORE/transparent.json" "$CORE/firewall.sh" "$CORE/40-krotex-routing" \
+	"$CORE/routing.json" "$CORE/transparent.json" "$CORE/sections.uc" "$CORE/firewall.sh" "$CORE/40-krotex-routing" \
 	"$LUCI/htdocs/luci-static/resources/view/krotex/status.js" \
 	"$LUCI/htdocs/luci-static/resources/krotex/vless.js" \
+	"$LUCI/htdocs/luci-static/resources/krotex/sections.js" \
 	"$LUCI/root/usr/libexec/krotex/connection" \
 	"$LUCI/root/usr/libexec/krotex/routing" \
+	"$LUCI/root/usr/libexec/krotex/sections" \
 	"$LUCI/root/usr/libexec/rpcd/krotex" \
 	"$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" \
 	"$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json"; do
@@ -154,10 +156,10 @@ fi
 log 'Installing runtime dependencies...'
 if [ "$MANAGER" = opkg ]; then
 	opkg update
-	opkg install ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy
+	opkg install ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy ucode ucode-mod-fs
 else
 	apk update
-	apk add ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy
+	apk add ca-bundle xray-core luci-base rpcd jshn ubus curl firewall4 nftables-json ip-full kmod-nft-tproxy ucode ucode-mod-fs
 fi
 . "$SYSROOT/usr/share/libubox/jshn.sh"
 [ -x "$SYSROOT/etc/init.d/rpcd" ] || die 'rpcd init script is missing.'
@@ -188,20 +190,23 @@ else
 	PROG="$WORK/new-core"
 	REPLACE_CORE=1
 fi
-"$PROG" run -test -config "$CONFIG" -config "$CORE/transparent.json"
+"$PROG" run -test -config "$CORE/transparent.json" -config "$CONFIG"
 
 cat > "$WORK/managed" <<'EOF'
 etc/init.d/krotex
 usr/libexec/rpcd/krotex
 usr/libexec/krotex/connection
 usr/libexec/krotex/routing
+usr/libexec/krotex/sections
 usr/libexec/krotex/firewall
 usr/share/krotex/transparent.json
+usr/share/krotex/sections.uc
 etc/uci-defaults/40-krotex-routing
 usr/share/luci/menu.d/luci-app-krotex.json
 usr/share/rpcd/acl.d/luci-app-krotex.json
 www/luci-static/resources/view/krotex/status.js
 www/luci-static/resources/krotex/vless.js
+www/luci-static/resources/krotex/sections.js
 etc/krotex/config.json
 etc/krotex/routing.json
 etc/krotex/source-version
@@ -241,14 +246,17 @@ if [ "$REPLACE_CORE" -eq 1 ]; then
 	CORE_TEMP=
 fi
 copy_file "$CORE/transparent.json" "$SYSROOT/usr/share/krotex/transparent.json" 0644
+copy_file "$CORE/sections.uc" "$SYSROOT/usr/share/krotex/sections.uc" 0644
 copy_file "$CORE/40-krotex-routing" "$SYSROOT/etc/uci-defaults/40-krotex-routing" 0755
 copy_file "$LUCI/root/usr/libexec/rpcd/krotex" "$SYSROOT/usr/libexec/rpcd/krotex" 0755
 copy_file "$LUCI/root/usr/libexec/krotex/connection" "$SYSROOT/usr/libexec/krotex/connection" 0755
 copy_file "$LUCI/root/usr/libexec/krotex/routing" "$SYSROOT/usr/libexec/krotex/routing" 0755
+copy_file "$LUCI/root/usr/libexec/krotex/sections" "$SYSROOT/usr/libexec/krotex/sections" 0755
 copy_file "$LUCI/root/usr/share/luci/menu.d/luci-app-krotex.json" "$SYSROOT/usr/share/luci/menu.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/root/usr/share/rpcd/acl.d/luci-app-krotex.json" "$SYSROOT/usr/share/rpcd/acl.d/luci-app-krotex.json" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/view/krotex/status.js" "$SYSROOT/www/luci-static/resources/view/krotex/status.js" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/vless.js" "$SYSROOT/www/luci-static/resources/krotex/vless.js" 0644
+copy_file "$LUCI/htdocs/luci-static/resources/krotex/sections.js" "$SYSROOT/www/luci-static/resources/krotex/sections.js" 0644
 if [ ! -f "$SYSROOT/etc/krotex/config.json" ]; then
 	copy_file "$CORE/config.json" "$SYSROOT/etc/krotex/config.json" 0600
 fi

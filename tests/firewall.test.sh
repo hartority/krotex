@@ -1,5 +1,5 @@
 #!/bin/sh
-# Requires root, Python 3, network namespaces and an OpenWrt x86_64 rootfs with ip-full.
+# Requires root, Python 3, OpenSSL, network namespaces and an OpenWrt x86_64 rootfs with ip-full.
 set -eu
 : "${OPENWRT_TEST_ROOT:?Set OPENWRT_TEST_ROOT to an extracted OpenWrt x86_64 rootfs}"
 if [ "${KROTEX_TEST_NETNS:-0}" != 1 ]; then
@@ -30,6 +30,11 @@ cat > "$WORK/bin/jshn" <<EOF
 exec "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/usr/bin/jshn" "\$@"
 EOF
 chmod 0755 "$WORK/bin/"*
+cat > "$WORK/bin/ucode" <<EOF
+#!/bin/sh
+exec "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/usr/bin/ucode" -L "$RUNTIME/usr/lib/ucode" "\$@"
+EOF
+chmod 0755 "$WORK/bin/ucode"
 PATH="$WORK/bin:$PATH"
 export PATH
 sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
@@ -206,7 +211,7 @@ nsenter -t "$WAN" -n "$XRAY_TEST_BINARY" run -config "$WORK/endpoint.json" > "$W
 PIDS="$PIDS $!"
 "$XRAY_TEST_BINARY" run -config "$WORK/server.json" > "$WORK/server.log" 2>&1 &
 PIDS="$PIDS $!"
-"$XRAY_TEST_BINARY" run -config "$WORK/client.json" -config package/krotex/files/transparent.json > "$WORK/client.log" 2>&1 &
+"$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/client.json" > "$WORK/client.log" 2>&1 &
 CLIENT_PID=$!
 PIDS="$PIDS $CLIENT_PID"
 "$XRAY_TEST_BINARY" run -config "$WORK/endpoint.json" > "$WORK/local-endpoint.log" 2>&1 &
@@ -313,3 +318,73 @@ fw stop
 code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
 test "$code" = 403
 echo 'PASS: explicit service stop removes interception and restores direct access'
+
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=vpn.krotex.test' \
+	-addext 'subjectAltName=DNS:vpn.krotex.test,DNS:*.krotex.test' \
+	-keyout "$WORK/server.key" -out "$WORK/server.crt" > "$WORK/cert.log" 2>&1
+python3 tests/sections-traffic.py "$WORK"
+for index in 1 2; do
+	"$XRAY_TEST_BINARY" run -config "$WORK/vpn$index.json" > "$WORK/vpn$index.log" 2>&1 &
+	PIDS="$PIDS $!"
+done
+nsenter -t "$WAN" -n openssl s_server -quiet -www -accept 8443 -cert "$WORK/server.crt" -key "$WORK/server.key" > "$WORK/https.log" 2>&1 &
+PIDS="$PIDS $!"
+ucode package/krotex/files/sections.uc compile "$WORK/client.json" "$WORK/sections-request.json" > "$WORK/sections-client.json"
+python3 tests/sections-traffic.py "$WORK" trust
+"$XRAY_TEST_BINARY" run -test -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-validation.log" 2>&1 || { cat "$WORK/sections-validation.log"; exit 1; }
+"$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
+SECTIONS_PID=$!
+PIDS="$PIDS $SECTIONS_PID"
+sleep 1
+touch "$WORK/active"
+fw apply
+probe_section() {
+	local host="$1" tag="$2" before code
+	before="$(wc -l < "$WORK/sections-client.log")"
+	code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 6 --resolve "$host:8080:93.184.216.34" -o /dev/null -w '%{http_code}' "http://$host:8080/")" || {
+		cat "$WORK/sections-client.log" "$WORK/vpn1.log" "$WORK/vpn2.log"
+		return 1
+	}
+	test "$code" = 403
+	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq "device-tproxy (>>|->) $tag]"
+}
+probe_section exclude.krotex.test direct
+probe_section overlap.krotex.test direct
+probe_section one.krotex.test section-vpn1
+probe_section sub.one.krotex.test section-vpn1
+probe_section two.krotex.test section-vpn2
+probe_section unmatched.krotex.test section-vpn2
+echo 'PASS: HTTP domain rules choose direct, VPN 1 or VPN 2; subdomains and first-match exclusions work'
+for number in 1 2; do
+	port=$((11080 + number))
+	before="$(wc -l < "$WORK/sections-client.log")"
+	code="$(curl --silent --show-error --noproxy '' --proxy "socks5h://127.0.0.1:$port" --max-time 6 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+	test "$code" = 403
+	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq "section-check-vpn$number (>>|->) section-vpn$number]"
+done
+echo 'PASS: each connection check is isolated to its own VPN even when VPN 2 is the default'
+before="$(wc -l < "$WORK/sections-client.log")"
+code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 6 --cacert "$WORK/server.crt" --resolve 'one.krotex.test:8443:93.184.216.34' -o /dev/null -w '%{http_code}' https://one.krotex.test:8443/)"
+test "$code" = 200
+tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->) section-vpn1]'
+echo 'PASS: HTTPS SNI selects the domain section through real TPROXY and TLS/VLESS'
+before="$(wc -l < "$WORK/sections-client.log")"
+code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 6 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
+test "$code" = 403
+tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->) section-vpn2]'
+before="$(wc -l < "$WORK/sections-client.log")"
+timeout 6 nsenter -t "$LAN" -n bash -c 'exec 3<>/dev/udp/93.184.216.34/5353; printf "\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x06device\x06krotex\x04test\x00\x00\x01\x00\x01" >&3; dd bs=512 count=1 <&3 2>/dev/null' > "$WORK/section-udp"
+tail -c 4 "$WORK/section-udp" | od -An -tu1 | grep -Eq '203[[:space:]]+0[[:space:]]+113[[:space:]]+77'
+tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->) section-vpn2]'
+echo 'PASS: connections without hostnames and non-DNS UDP use the default VPN 2'
+
+kill "$SECTIONS_PID"
+wait "$SECTIONS_PID" 2>/dev/null || :
+ucode package/krotex/files/sections.uc compile "$WORK/client.json" "$WORK/sections-direct-request.json" > "$WORK/sections-client.json"
+python3 tests/sections-traffic.py "$WORK" trust
+"$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
+PIDS="$PIDS $!"
+sleep 1
+probe_section unmatched.krotex.test direct
+probe_section one.krotex.test section-vpn1
+echo 'PASS: without a default VPN, unmatched traffic is direct while listed sites still use VPN 1'

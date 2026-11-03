@@ -12,8 +12,7 @@ function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
       pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
-    notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: [],
-    connection: { configured: false },
+    notifications: [], actions: [], pollers: [], code: 0,
     routing: { enabled: false, active: false, macs: [] }, routingCalls: [], routingCode: 0
   };
   const context = vm.createContext({
@@ -21,10 +20,7 @@ function harness(writable = true) {
     E: (tag, attrs, children) => ({ tag, attrs, children, value: attrs.value || '', style: {}, textContent: '', scrollHeight: 320,
       replaceChildren(...items) { this.children = items; } }),
     _: text => text,
-    vless: { inspect: value => {
-      if (value !== 'vless://valid') throw new Error('Invalid link');
-      return { profile: { id: 'test-uuid', address: 'proxy.example' }, ignored: state.ignored };
-    }, format: () => 'vless://valid' },
+    sections: { create: () => ({ render: () => ({}), setState: () => {} }) },
     L: { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => writable },
     view: { extend: view => view },
     rpc: { declare: spec => async (action, enabled) => {
@@ -32,12 +28,6 @@ function harness(writable = true) {
         if (state.offline) throw new Error('RPC offline');
         return state.response;
       }
-      if (spec.method === 'connection') return state.connection;
-      if (spec.method === 'save_connection') {
-        state.saved.push(JSON.parse(action));
-        return { code: state.connectionCode, message: 'Rejected' };
-      }
-      if (spec.method === 'test_connection') return { code: 0, ip: '203.0.113.2' };
       if (spec.method === 'devices') return { devices: [{ name: 'Phone', address: '192.168.1.10', mac: '02:11:22:33:44:55' }] };
       if (spec.method === 'routing') return state.routing;
       if (spec.method === 'set_routing') {
@@ -126,54 +116,10 @@ test('failed service command notifies the user and releases controls', async () 
   assert.ok(state.view.buttons.every(button => !button.disabled));
 });
 
-test('applying a link sends a profile and keeps the link visible', async () => {
-  const state = harness();
-  state.view.connectionInput.value = 'vless://valid';
-  await state.view.handleConnection('save');
-  assert.deepEqual(state.saved, [{ id: 'test-uuid', address: 'proxy.example', url: 'vless://valid' }]);
-  assert.equal(state.view.connectionInput.value, 'vless://valid');
-  assert.equal(state.view.connectionResult.textContent, 'Connection saved and applied.');
-  assert.equal(state.view.busy, false);
-});
 
-test('link editor is a visible multiline text area', () => {
-  const { view } = harness();
-  assert.equal(view.connectionInput.tag, 'textarea');
-  assert.equal(view.connectionInput.attrs.type, undefined);
-  assert.ok(Number(view.connectionInput.attrs.rows) > 1);
-});
 
-test('ignored parameters appear below the link while typing and do not block saving', async () => {
-  const state = harness();
-  state.ignored = ['fm'];
-  state.view.connectionInput.value = 'vless://valid';
-  state.view.connectionInput.attrs.input();
-  assert.equal(state.view.connectionWarning.textContent, 'Ignored parameters (not applied): fm');
-  await state.view.handleConnection('save');
-  assert.equal(state.saved.length, 1);
-  assert.equal(state.view.connectionWarning.textContent, 'Ignored parameters (not applied): fm');
-  state.view.connectionInput.value = '';
-  state.view.connectionInput.attrs.input();
-  assert.equal(state.view.connectionWarning.textContent, '');
-});
 
-test('invalid link is rejected before RPC and failed saves keep the input', async () => {
-  const state = harness();
-  state.view.connectionInput.value = 'not a link';
-  await state.view.handleConnection('save');
-  assert.equal(state.saved.length, 0);
-  state.view.connectionInput.value = 'vless://valid';
-  state.connectionCode = 1;
-  await state.view.handleConnection('save');
-  assert.equal(state.view.connectionInput.value, 'vless://valid');
-  assert.equal(state.view.connectionResult.textContent, 'Rejected');
-});
 
-test('connection check displays the exit IP', async () => {
-  const state = harness();
-  await state.view.handleConnection('test');
-  assert.equal(state.view.connectionResult.textContent, 'Connection successful. Exit IP: 203.0.113.2');
-});
 
 test('DHCP selection immediately adds a device to the visible routing list', async () => {
   const state = harness();
@@ -211,23 +157,4 @@ test('adding two devices preserves both, and the cross removes only its own devi
   await state.view.routingRemoveButtons[0].attrs.click();
   assert.equal(state.routing.enabled, false);
   assert.equal(state.view.routingList.children[0].children, 'No devices added');
-});
-
-test('opening the page restores the saved link and sizes the textbox to all content', async () => {
-  const state = harness();
-  state.connection = { configured: true, link: 'vless://valid', address: 'proxy.example', port: 443, security: 'reality' };
-  await state.view.refreshConnection();
-  assert.equal(state.view.connectionInput.value, 'vless://valid');
-  assert.equal(state.view.connectionInput.style.height, '320px');
-  state.view.connectionInput.value = 'unfinished edit';
-  state.view.connectionInput.attrs.input();
-  await state.view.refreshConnection();
-  assert.equal(state.view.connectionInput.value, 'unfinished edit');
-});
-
-test('older connections without an original link are reconstructed', async () => {
-  const state = harness();
-  state.connection = { configured: true, profile: {}, address: 'proxy.example', port: 443, security: 'tls' };
-  await state.view.refreshConnection();
-  assert.equal(state.view.connectionInput.value, 'vless://valid');
 });

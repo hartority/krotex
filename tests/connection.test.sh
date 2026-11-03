@@ -316,3 +316,90 @@ call_routing set_routing
 expect_code 0
 test ! -f "$WORK/routing-active"
 echo 'PASS: device routing can be disabled even when the service is stopped'
+
+cat > "$WORK/bin/ucode" <<EOF
+#!/bin/sh
+exec "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/usr/bin/ucode" -L "$RUNTIME/usr/lib/ucode" "\$@"
+EOF
+chmod 0755 "$WORK/bin/ucode"
+sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
+	-e "s|/etc/krotex/|$TEST_ROOT/etc/krotex/|g" \
+	-e "s|/etc/init.d/krotex|$TEST_ROOT/etc/init.d/krotex|g" \
+	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
+	-e "s|/usr/libexec/krotex/xray|$TEST_ROOT/private-xray|g" \
+	-e "s|/var/lock/krotex-setup.lock|$TEST_ROOT/var/lock/krotex-setup.lock|g" \
+	-e "s|/usr/share/krotex/sections.uc|$(pwd)/package/krotex/files/sections.uc|g" \
+	-e "s|/usr/share/krotex/transparent.json|$WORK/transparent.json|g" \
+	package/luci-app-krotex/root/usr/libexec/krotex/sections > "$WORK/sections"
+call_sections() {
+	"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
+		"$RUNTIME/bin/busybox" ash "$WORK/sections" "$1" < "$WORK/request" > "$WORK/result"
+}
+section_request() {
+	json_init; json_add_string sections "$sections"; json_dump > "$WORK/request"
+}
+call_sections sections
+json_load "$(cat "$WORK/result")"
+json_select sections; json_select 1; json_get_var fallback fallback
+test "$fallback" = 1
+echo 'PASS: section API imports the existing connection without changing its configuration'
+
+profile="$(printf '%s' "$profile" | sed 's/"port":"443"/"port":443/')"
+sections="[{\"id\":\"exclude\",\"name\":\"exclude\",\"mode\":\"direct\",\"enabled\":true,\"fallback\":false,\"domains\":[\"example.com\"]},{\"id\":\"vpn1\",\"name\":\"VPN 1\",\"mode\":\"proxy\",\"enabled\":true,\"fallback\":false,\"domains\":[\"one.test\"],\"profile\":$profile},{\"id\":\"vpn2\",\"name\":\"VPN 2\",\"mode\":\"proxy\",\"enabled\":true,\"fallback\":true,\"domains\":[],\"profile\":$profile}]"
+section_request
+call_sections save_sections
+expect_code 0
+test -f "$TEST_ROOT/running"
+cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/sections-saved"
+call_sections sections
+json_load "$(cat "$WORK/result")"
+json_select sections; json_get_keys keys
+set -- $keys
+test "$#" -eq 3
+echo 'PASS: section API saves exclude and two independent VPN sections atomically'
+
+rm -f "$TEST_ROOT/fail-request" "$TEST_ROOT/curl-args"
+printf '{"id":"vpn2"}\n' > "$WORK/request"
+call_sections test_section
+expect_code 0
+grep -q 'socks5h://127.0.0.1:11082' "$TEST_ROOT/curl-args"
+rm "$TEST_ROOT/curl-args"
+printf '{"id":"exclude"}\n' > "$WORK/request"
+call_sections test_section
+expect_code 1
+test ! -f "$TEST_ROOT/curl-args"
+echo 'PASS: a section check uses its own proxy listener and rejects direct sections'
+
+request
+call save_connection
+expect_code 1
+cmp "$WORK/sections-saved" "$TEST_ROOT/etc/krotex/config.json"
+echo 'PASS: the legacy connection API cannot overwrite saved sections'
+
+section_request
+touch "$TEST_ROOT/reject-config"
+call_sections save_sections
+expect_code 1
+cmp "$WORK/sections-saved" "$TEST_ROOT/etc/krotex/config.json"
+rm "$TEST_ROOT/reject-config"
+touch "$TEST_ROOT/fail-start"
+call_sections save_sections
+expect_code 1
+cmp "$WORK/sections-saved" "$TEST_ROOT/etc/krotex/config.json"
+test -f "$TEST_ROOT/running"
+mkdir "$TEST_ROOT/var/lock/krotex-setup.lock"
+call_sections save_sections
+expect_code 1
+test -d "$TEST_ROOT/var/lock/krotex-setup.lock"
+rmdir "$TEST_ROOT/var/lock/krotex-setup.lock"
+echo 'PASS: rejected sections, failed startup and concurrent updates preserve the saved configuration'
+
+sections='[]'
+section_request
+call_sections save_sections
+expect_code 0
+touch "$WORK/service-active"
+printf '{"enabled":true,"mac":"02:11:22:33:44:55"}\n' > "$WORK/request"
+call_routing set_routing
+expect_code 0
+echo 'PASS: devices can use domain sections with a direct-only default and no VPN'

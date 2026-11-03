@@ -5,6 +5,11 @@
       "listen": "127.0.0.1",
       "port": 10809,
       "protocol": "dokodemo-door",
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      },
       "settings": {
         "network": "tcp,udp",
         "followRedirect": true
