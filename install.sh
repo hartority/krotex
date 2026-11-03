@@ -55,7 +55,7 @@ cleanup() {
 	trap - EXIT HUP INT TERM
 	if [ "$CHANGED" -eq 1 ]; then
 		log 'Installation failed; restoring previous Krotex files.' >&2
-		"$SYSROOT/etc/init.d/krotex" stop >/dev/null 2>&1 || :
+		KROTEX_KEEP_ROUTING=1 "$SYSROOT/etc/init.d/krotex" stop >/dev/null 2>&1 || :
 		while IFS= read -r path; do
 			rm -f "$SYSROOT/$path"
 		done < "$WORK/managed"
@@ -232,18 +232,20 @@ tar -czf "$BACKUP" -C "${SYSROOT:-/}" -T "$WORK/existing"
 chmod 0600 "$BACKUP"
 log "Backup: $BACKUP"
 
-CHANGED=1
-if [ "$WAS_RUNNING" -eq 1 ]; then
-	"$SYSROOT/etc/init.d/krotex" stop
-fi
-
 copy_file() {
 	mkdir -p "$(dirname "$2")"
 	cp "$1" "$2"
 	chmod "$3" "$2"
 }
-copy_file "$CORE/krotex.init" "$SYSROOT/etc/init.d/krotex" 0755
+
+CHANGED=1
+# Deploy the hold-aware firewall before an older init script is stopped.
 copy_file "$CORE/firewall.sh" "$SYSROOT/usr/libexec/krotex/firewall" 0755
+if [ "$WAS_RUNNING" -eq 1 ]; then
+	KROTEX_KEEP_ROUTING=1 "$SYSROOT/etc/init.d/krotex" stop
+fi
+
+copy_file "$CORE/krotex.init" "$SYSROOT/etc/init.d/krotex" 0755
 if [ "$REPLACE_CORE" -eq 1 ]; then
 	CORE_TEMP="$(mktemp "$SYSROOT/usr/libexec/krotex/.xray-install.XXXXXX")"
 	copy_file "$WORK/new-core" "$CORE_TEMP" 0755

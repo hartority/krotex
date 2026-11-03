@@ -41,7 +41,7 @@ cleanup() {
 	trap - EXIT HUP INT TERM
 	if [ "$CHANGED" -eq 1 ]; then
 		log 'Core update failed; restoring the previous core.' >&2
-		"$INIT" stop >/dev/null 2>&1
+		KROTEX_KEEP_ROUTING=1 "$INIT" stop >/dev/null 2>&1
 		if [ "$HAD_PRIVATE" -eq 1 ]; then
 			if ! mv -f "$PREVIOUS" "$CORE"; then
 				log "Recovery copy retained at $PREVIOUS" >&2

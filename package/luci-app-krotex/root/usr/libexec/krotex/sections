@@ -29,7 +29,7 @@ cleanup() {
 		wait "$PROBE_PID" 2>/dev/null || :
 	fi
 	if [ "$CHANGED" -eq 1 ]; then
-		"$INIT" stop >/dev/null 2>&1
+		KROTEX_KEEP_ROUTING=1 "$INIT" stop >/dev/null 2>&1
 		recovered=1
 		mv "$WORK/previous.json" "$CONFIG" || recovered=0
 		if [ "$METHOD" = save_settings ]; then

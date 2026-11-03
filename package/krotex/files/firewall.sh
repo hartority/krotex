@@ -6,6 +6,8 @@ CONFIG=/etc/krotex/routing.json
 CORE_CONFIG=/etc/krotex/config.json
 COMPILER=/usr/share/krotex/sections.uc
 STATE=/var/run/krotex/routing-service-active
+STOPPED=/var/run/krotex/routing-service-stopped
+INIT=/etc/init.d/krotex
 POLICY_STATE=/var/run/krotex/policy-owned
 LOCK=/var/lock/krotex-firewall.lock
 MARK=0x4b520000/0xffff0000
@@ -242,7 +244,14 @@ apply_rules() {
 	if [ ! -f "$CONFIG" ]; then remove_rules; return; fi
 	json_load "$(cat "$CONFIG")" || return 1
 	json_get_var enabled enabled
-	[ -f "$STATE" ] || { remove_rules; return; }
+	if [ ! -f "$STATE" ]; then
+		# On boot, protect an enabled service before its process is ready.
+		# An explicit manual stop remains direct across firewall reloads.
+		if [ ! -f "$STOPPED" ] && [ -x "$INIT" ] && "$INIT" enabled >/dev/null 2>&1; then
+			mkdir -p "$(dirname "$STATE")" && touch "$STATE" || return 1
+		else remove_rules; return
+		fi
+	fi
 	json_get_var mode mode
 	case "$mode" in ''|selected) mode=selected ;; all) ;; *) error 'Invalid routing mode.'; return 1 ;; esac
 	json_get_type kind macs
@@ -278,10 +287,12 @@ apply_rules() {
 	fi
 }
 
+# Internal restarts and rollbacks must never temporarily release routed traffic.
+if [ "${1:-apply}" = stop ] && [ "${KROTEX_KEEP_ROUTING:-0}" = 1 ]; then set -- hold; fi
 case "${1:-apply}" in
 	render) render "$2"; exit $? ;;
 	status) nft list table inet krotex >/dev/null 2>&1; exit $? ;;
-	apply|remove|start|stop) ;;
+	apply|remove|start|stop|arm|hold) ;;
 	*) exit 2 ;;
 esac
 for attempt in 1 2 3 4 5; do
@@ -293,6 +304,12 @@ umask 077
 WORK="$(mktemp -d /tmp/krotex-firewall.XXXXXX)" || exit 1
 case "${1:-apply}" in
 	apply) apply_rules ;;
+	hold) : ;;
+	arm)
+		mkdir -p "$(dirname "$STATE")" && touch "$STATE" || exit 1
+		rm -f "$STOPPED"
+		apply_rules
+		;;
 	remove) remove_rules ;;
 	start)
 		ready=0
@@ -302,9 +319,11 @@ case "${1:-apply}" in
 		done
 		[ "$ready" -eq 1 ] || { error 'Xray did not start.'; exit 1; }
 		mkdir -p "$(dirname "$STATE")" && touch "$STATE" || exit 1
+		rm -f "$STOPPED"
 		apply_rules
 		;;
 	stop)
+		mkdir -p "$(dirname "$STOPPED")" && touch "$STOPPED" || exit 1
 		rm -f "$STATE"
 		remove_rules
 		;;

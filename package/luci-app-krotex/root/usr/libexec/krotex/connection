@@ -31,7 +31,7 @@ acquire_lock() {
 
 cleanup() {
 	if [ "$CHANGED" -eq 1 ]; then
-		"$INIT" stop >/dev/null 2>&1
+		KROTEX_KEEP_ROUTING=1 "$INIT" stop >/dev/null 2>&1
 		if mv -f "$PREVIOUS" "$CONFIG"; then
 			[ "$WAS_RUNNING" -eq 0 ] || "$INIT" start >/dev/null 2>&1
 		else

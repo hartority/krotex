@@ -54,6 +54,11 @@ case "$*" in
 esac
 EOF
 chmod 0755 "$WORK/bin/uci" "$WORK/bin/ubus"
+cat > "$WORK/init" <<EOF
+#!/bin/sh
+[ "\$1" = enabled ] && [ -f "$WORK/boot-enabled" ]
+EOF
+chmod 0755 "$WORK/init"
 PATH="$WORK/bin:$PATH"
 export PATH
 sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
@@ -61,6 +66,8 @@ sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/etc/krotex/config.json|$WORK/core-config.json|g" \
 	-e "s|/usr/share/krotex/sections.uc|$(pwd)/package/krotex/files/sections.uc|g" \
 	-e "s|/var/run/krotex/routing-service-active|$WORK/active|g" \
+	-e "s|/var/run/krotex/routing-service-stopped|$WORK/stopped|g" \
+	-e "s|/etc/init.d/krotex|$WORK/init|g" \
 	-e "s|/var/run/krotex/policy-owned|$WORK/policy-owned|g" \
 	-e "s|/var/lock/krotex-firewall.lock|$WORK/lock/firewall|g" \
 	package/krotex/files/firewall.sh > "$WORK/firewall"
@@ -373,7 +380,7 @@ fi
 printf '{"enabled":true,"macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
 fw apply
 
-kill "$CLIENT_PID"
+kill -KILL "$CLIENT_PID"
 wait "$CLIENT_PID" 2>/dev/null || :
 fw apply
 if nsenter -t "$LAN" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null http://93.184.216.34:8080/; then
@@ -389,8 +396,27 @@ if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null 
 	exit 1
 fi
 echo 'PASS: all-device mode stays closed after a proxy crash'
+KROTEX_KEEP_ROUTING=1 fw stop
+test -f "$WORK/active"
+nft list table inet krotex >/dev/null
+if nsenter -t "$LAN" -n curl --silent --noproxy '*' --max-time 2 -o /dev/null http://93.184.216.34:8080/; then
+	echo 'FAIL: internal update stop released routed traffic' >&2; exit 1
+fi
+rm -f "$WORK/active" "$WORK/stopped"
+touch "$WORK/boot-enabled"
+fw apply
+test -f "$WORK/active"
+if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 2 -o /dev/null http://93.184.216.34:8080/; then
+	echo 'FAIL: boot firewall reload released traffic before the core started' >&2; exit 1
+fi
+echo 'PASS: internal stops and boot firewall reloads retain protection while the core is unavailable'
+
 
 fw stop
+test -f "$WORK/stopped"
+fw apply
+test ! -f "$WORK/active"
+rm -f "$WORK/boot-enabled"
 code="$(nsenter -t "$LAN" -n curl --silent --show-error --noproxy '*' --max-time 8 -o /dev/null -w '%{http_code}' http://93.184.216.34:8080/)"
 test "$code" = 403
 echo 'PASS: explicit service stop removes interception and restores direct access'
@@ -427,6 +453,7 @@ python3 tests/sections-traffic.py "$WORK"
 for index in 1 2; do
 	"$XRAY_TEST_BINARY" run -config "$WORK/vpn$index.json" > "$WORK/vpn$index.log" 2>&1 &
 	[ "$index" != 1 ] || VPN1_PID=$!
+	[ "$index" != 2 ] || VPN2_PID=$!
 	PIDS="$PIDS $!"
 done
 nsenter -t "$WAN" -n openssl s_server -quiet -www -accept 8443 -cert "$WORK/server.crt" -key "$WORK/server.key" > "$WORK/https.log" 2>&1 &
@@ -535,6 +562,22 @@ timeout 6 nsenter -t "$LAN" -n bash -c 'exec 3<>/dev/udp/93.184.216.34/5353; pri
 tail -c 4 "$WORK/section-udp" | od -An -tu1 | grep -Eq '203[[:space:]]+0[[:space:]]+113[[:space:]]+77'
 tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-tproxy (>>|->) section-vpn2]'
 echo 'PASS: connections without hostnames and non-DNS UDP use the default VPN 2'
+kill "$VPN2_PID"
+wait "$VPN2_PID" 2>/dev/null || :
+if nsenter -t "$LAN" -n curl --silent --noproxy '*' --max-time 3 --resolve 'unmatched.krotex.test:8080:93.184.216.34' -o /dev/null http://unmatched.krotex.test:8080/; then
+	echo 'FAIL: unmatched traffic fell back to Direct after VPN 2 failed' >&2; exit 1
+fi
+if timeout 4 nsenter -t "$LAN" -n "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 192.168.55.1 > "$WORK/failed-vpn-dns" 2>&1; then
+	echo 'FAIL: DNS fell back to Direct after VPN 2 failed' >&2; exit 1
+fi
+probe_section exclude.krotex.test direct
+probe_section one.krotex.test section-vpn1
+"$XRAY_TEST_BINARY" run -config "$WORK/vpn2.json" > "$WORK/vpn2.log" 2>&1 &
+VPN2_PID=$!
+PIDS="$PIDS $VPN2_PID"
+sleep 1
+echo 'PASS: a failed default VPN blocks unmatched traffic and DNS while explicit Direct and another VPN keep working'
+
 
 kill "$SECTIONS_PID"
 wait "$SECTIONS_PID" 2>/dev/null || :
@@ -595,6 +638,14 @@ if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 --resolve 'bl
 	echo 'FAIL: device VPN bypassed its failed server' >&2; exit 1
 fi
 echo 'PASS: an unavailable device VPN server does not fall back to direct traffic'
+printf '{"enabled":true,"mode":"selected","macs":["02:11:22:33:44:55"]}\n' > "$WORK/routing.json"
+fw apply
+if nsenter -t "$LAN" -n curl --silent --noproxy '*' --max-time 3 --resolve 'one.krotex.test:8080:93.184.216.34' -o /dev/null http://one.krotex.test:8080/; then
+	echo 'FAIL: domain traffic fell back to Direct after VPN 1 failed' >&2; exit 1
+fi
+probe_section exclude.krotex.test direct
+echo 'PASS: a failed domain VPN does not fall back to Direct even when unmatched traffic is configured as Direct'
+
 
 if curl --silent --noproxy '' --proxy socks5h://127.0.0.1:11180 --max-time 3 -o /dev/null http://93.184.216.34:8080/; then
 	echo 'FAIL: isolated profile check bypassed the failed VPN server' >&2; exit 1

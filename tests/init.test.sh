@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 . ./package/krotex/files/krotex.init
 
 test_dir="$(mktemp -d)"
-trap 'rm -f "$test_dir/xray" "$test_dir/private-xray" "$test_dir/init" "$test_dir/config.json" "$test_dir/events"; rmdir "$test_dir"' EXIT
+trap 'rm -f "$test_dir/xray" "$test_dir/private-xray" "$test_dir/init" "$test_dir/config.json" "$test_dir/events" "$test_dir/firewall"; rmdir "$test_dir"' EXIT
 PROG="$test_dir/xray"
 CONF="$test_dir/config.json"
 TRANSPARENT=./package/krotex/files/transparent.json
@@ -17,6 +17,13 @@ cat > "$PROG" <<'EOF'
 printf '%s\n' "$*" >> "$EVENTS"
 exit "${XRAY_TEST_EXIT:-0}"
 EOF
+FIREWALL="$test_dir/firewall"
+cat > "$FIREWALL" <<'EOF'
+#!/bin/sh
+printf 'firewall %s\n' "$*" >> "$EVENTS"
+exit 0
+EOF
+chmod 0755 "$FIREWALL"
 chmod 0755 "$PROG"
 
 procd_open_instance() { printf 'instance %s\n' "$*" >> "$EVENTS"; }
@@ -41,7 +48,20 @@ grep -q '^instance main$' "$EVENTS"
 grep -q '^param command .* run -config ' "$EVENTS"
 grep -q '^param respawn 3600 5 5$' "$EVENTS"
 grep -q '^close$' "$EVENTS"
-echo 'PASS: config validation and procd registration'
+test "$(head -n 1 "$EVENTS")" = 'firewall arm'
+: > "$EVENTS"
+action=restart; stop_service
+test "$(cat "$EVENTS")" = 'firewall hold'
+: > "$EVENTS"
+action=stop; KROTEX_KEEP_ROUTING=1 stop_service
+test "$(cat "$EVENTS")" = 'firewall hold'
+: > "$EVENTS"
+action=shutdown; stop_service
+test "$(cat "$EVENTS")" = 'firewall hold'
+: > "$EVENTS"
+action=stop; stop_service
+test "$(cat "$EVENTS")" = 'firewall stop'
+echo 'PASS: config validation, pre-start protection and preserving routing during restart/update/shutdown'
 
 cp "$test_dir/xray" "$test_dir/private-xray"
 sed "s|/usr/libexec/krotex/xray|$test_dir/private-xray|g" package/krotex/files/krotex.init > "$test_dir/init"

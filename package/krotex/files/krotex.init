@@ -8,8 +8,11 @@ PROG=/usr/bin/xray
 [ ! -x /usr/libexec/krotex/xray ] || PROG=/usr/libexec/krotex/xray
 CONF=/etc/krotex/config.json
 TRANSPARENT=/usr/share/krotex/transparent.json
+FIREWALL=/usr/libexec/krotex/firewall
 
 start_service() {
+	# Install protection before validating or launching the core.
+	"$FIREWALL" arm || return 1
 	[ -x "$PROG" ] && [ -r "$CONF" ] && [ -r "$TRANSPARENT" ] || return 1
 
 	# Reject invalid configuration before registering a respawning instance.
@@ -27,9 +30,12 @@ start_service() {
 }
 
 service_started() {
-	/usr/libexec/krotex/firewall start
+	"$FIREWALL" start
 }
 
 stop_service() {
-	/usr/libexec/krotex/firewall stop
+	case "${action:-stop}:${KROTEX_KEEP_ROUTING:-0}" in
+		restart:*|reload:*|shutdown:*|*:1) "$FIREWALL" hold ;;
+		*) "$FIREWALL" stop ;;
+	esac
 }
