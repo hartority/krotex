@@ -11,7 +11,7 @@ const source = readFileSync(resolve(__dirname,
 function harness(writable = true) {
   const state = {
     response: { available: true, installed: true, running: true, enabled: true,
-      pid: 42, uptime: 3661, memory_kib: 2048 },
+      pid: 42, uptime: 3661, memory_kib: 2048, core_version: '26.10.21' },
     notifications: [], actions: [], pollers: [], code: 0, saved: [], connectionCode: 0, ignored: []
   };
   const context = vm.createContext({
@@ -54,6 +54,7 @@ function harness(writable = true) {
 test('shows process metrics and polls every five seconds', () => {
   const { view, pollers } = harness();
   assert.equal(view.fields.status.textContent, 'Running');
+  assert.equal(view.fields.core_version.textContent, '26.10.21');
   assert.equal(view.fields.uptime.textContent, '01:01:01');
   assert.equal(view.fields.memory.textContent, '2.0 MiB');
   assert.equal(view.fields.pid.textContent, '42');

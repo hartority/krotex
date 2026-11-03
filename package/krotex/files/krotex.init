@@ -5,6 +5,7 @@ STOP=10
 USE_PROCD=1
 
 PROG=/usr/bin/xray
+[ ! -x /usr/libexec/krotex/xray ] || PROG=/usr/libexec/krotex/xray
 CONF=/etc/krotex/config.json
 
 start_service() {

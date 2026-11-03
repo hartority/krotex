@@ -170,7 +170,9 @@ fi
 # Check the preserved config before stopping the existing process.
 CONFIG="$SYSROOT/etc/krotex/config.json"
 [ -f "$CONFIG" ] || CONFIG="$CORE/config.json"
-"$SYSROOT/usr/bin/xray" run -test -config "$CONFIG"
+PROG="$SYSROOT/usr/bin/xray"
+[ ! -x "$SYSROOT/usr/libexec/krotex/xray" ] || PROG="$SYSROOT/usr/libexec/krotex/xray"
+"$PROG" run -test -config "$CONFIG"
 
 cat > "$WORK/managed" <<'EOF'
 etc/init.d/krotex

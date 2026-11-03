@@ -5,6 +5,8 @@ _json_no_warning=1
 
 CONFIG=/etc/krotex/config.json
 INIT=/etc/init.d/krotex
+PROG=/usr/bin/xray
+[ ! -x /usr/libexec/krotex/xray ] || PROG=/usr/libexec/krotex/xray
 LOCK=/var/lock/krotex-setup.lock
 WORK=
 PREVIOUS=
@@ -183,7 +185,7 @@ save() {
 	umask 077
 	WORK="$(mktemp -d /etc/krotex/.apply.XXXXXX)" || fail 'Unable to create temporary files.'
 	generate > "$WORK/config.json" || fail 'Unable to generate Xray configuration.'
-	/usr/bin/xray run -test -config "$WORK/config.json" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
+	"$PROG" run -test -config "$WORK/config.json" > "$WORK/validation.log" 2>&1 || fail 'Xray rejected the configuration. Check the connection settings and core version.'
 	if running; then WAS_RUNNING=1; else
 		[ "$?" -eq 1 ] || fail 'Unable to query procd.'
 	fi

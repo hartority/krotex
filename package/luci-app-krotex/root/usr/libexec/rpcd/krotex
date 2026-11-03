@@ -4,6 +4,8 @@
 _json_no_warning=1
 
 INIT=/etc/init.d/krotex
+PROG=/usr/bin/xray
+[ ! -x /usr/libexec/krotex/xray ] || PROG=/usr/libexec/krotex/xray
 
 status() {
 	local services running=0 pid=0 enabled=0 available=1 memory=0 uptime=0
@@ -39,7 +41,8 @@ status() {
 	json_add_boolean available "$available"
 	json_add_boolean running "$running"
 	json_add_boolean enabled "$enabled"
-	json_add_boolean installed "$([ -x /usr/bin/xray ] && echo 1 || echo 0)"
+	json_add_boolean installed "$([ -x "$PROG" ] && echo 1 || echo 0)"
+	json_add_string core_version "$("$PROG" version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
 	json_add_int pid "$pid"
 	json_add_int uptime "$uptime"
 	json_add_int memory_kib "$memory"

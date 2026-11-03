@@ -114,6 +114,7 @@ return view.extend({
 		this.fields.status.style.color = !available ? '' : running ? '#22863a' : '#b42318';
 		this.fields.enabled.textContent = available ? (data.enabled ? _('Enabled') : _('Disabled')) : '—';
 		this.fields.pid.textContent = running ? String(data.pid) : '—';
+		this.fields.core_version.textContent = available && data.core_version ? data.core_version : '—';
 		this.fields.uptime.textContent = running ? duration : '—';
 		this.fields.memory.textContent = running ? '%.1f MiB'.format((Number(data.memory_kib) || 0) / 1024) : '—';
 		this.fields.updated.textContent = available ? new Date().toLocaleTimeString() : '—';
@@ -162,6 +163,7 @@ return view.extend({
 		}, this));
 		var rows = [
 			[ 'status', _('Xray-core status') ],
+			[ 'core_version', _('Xray-core version') ],
 			[ 'enabled', _('Start on boot') ],
 			[ 'pid', _('Process ID') ],
 			[ 'uptime', _('Process uptime') ],

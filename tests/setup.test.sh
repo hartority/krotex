@@ -61,11 +61,17 @@ fi
 EOF
 cat > "$WORK/source/package/krotex/files/krotex.init" <<'EOF'
 #!/bin/sh
+# Supports the private /usr/libexec/krotex/xray core.
 case "$1" in
   enabled) test -f "$TEST_ROOT/enabled" ;;
   enable) touch "$TEST_ROOT/enabled" ;;
   disable) rm -f "$TEST_ROOT/enabled" ;;
-  start) touch "$TEST_ROOT/running" ;;
+  start|restart)
+    if [ "$1" = restart ] && [ -f "$TEST_ROOT/fail-core-start" ]; then
+      rm -f "$TEST_ROOT/fail-core-start" "$TEST_ROOT/running"
+      exit 1
+    fi
+    touch "$TEST_ROOT/running" ;;
   stop) rm -f "$TEST_ROOT/running" ;;
   *) exit 1 ;;
 esac
@@ -131,6 +137,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$url" in
+  https://github.com/XTLS/Xray-core/releases/download/*.zip.dgst)
+    printf 'SHA2-256= %s\n' "$TEST_CORE_DIGEST" > "$destination" ;;
+  https://github.com/XTLS/Xray-core/releases/download/*.zip)
+    printf '%s\n' "$url" > "$TEST_ROOT/core-url"
+    cp "$TEST_CORE_FILE" "$destination" ;;
   https://raw.githubusercontent.com/*)
     printf '%s\n' "$url" > "$TEST_ROOT/installer-url"
     cp "$TEST_INSTALLER" "$destination" ;;
@@ -166,3 +177,66 @@ chmod 0755 "$WORK/bin/apk"
 sh "$WORK/source/update.sh" > "$WORK/apk.log" 2>&1 || { cat "$WORK/apk.log"; exit 1; }
 test -f "$TEST_ROOT/running"
 echo 'PASS: apk dependency installation path'
+
+# Model the official release download and extraction without replacing host tools.
+sed "s|^SYSROOT=\$|SYSROOT=$TEST_ROOT|" update-core.sh > "$WORK/source/update-core.sh"
+TEST_CORE_FILE="$WORK/core-archive"
+cat > "$TEST_CORE_FILE" <<'EOF'
+#!/bin/sh
+case "$1" in
+  version) echo 'Xray 26.10.21 (test)' ;;
+  run) test ! -f "$TEST_ROOT/reject-private-core" ;;
+  *) exit 1 ;;
+esac
+EOF
+TEST_CORE_DIGEST="$(sha256sum "$TEST_CORE_FILE")"
+TEST_CORE_DIGEST=${TEST_CORE_DIGEST%% *}
+export TEST_CORE_FILE TEST_CORE_DIGEST
+cat > "$WORK/bin/uname" <<'EOF'
+#!/bin/sh
+echo aarch64
+EOF
+cat > "$WORK/bin/unzip" <<'EOF'
+#!/bin/sh
+cat "$2"
+EOF
+chmod 0755 "$WORK/bin/uname" "$WORK/bin/unzip"
+cp "$TEST_ROOT/usr/bin/xray" "$WORK/package-xray"
+sh "$WORK/source/update-core.sh" > "$WORK/core.log" 2>&1 || { cat "$WORK/core.log"; exit 1; }
+test -x "$TEST_ROOT/usr/libexec/krotex/xray"
+test -f "$TEST_ROOT/running"
+cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"
+grep -q 'Xray-linux-arm64-v8a.zip' "$TEST_ROOT/core-url"
+echo 'PASS: official core installs privately and preserves the package-managed core'
+
+cp "$TEST_ROOT/usr/libexec/krotex/xray" "$WORK/previous-core"
+TEST_CORE_DIGEST="$(printf '%064d' 0)"
+export TEST_CORE_DIGEST
+if sh "$WORK/source/update-core.sh" > "$WORK/checksum.log" 2>&1; then
+  echo 'FAIL: corrupt archive accepted' >&2
+  exit 1
+fi
+cmp "$WORK/previous-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+test -f "$TEST_ROOT/running"
+echo 'PASS: core checksum mismatch aborts before changing service or binary'
+
+printf '\n# Updated test core\n' >> "$TEST_CORE_FILE"
+TEST_CORE_DIGEST="$(sha256sum "$TEST_CORE_FILE")"
+TEST_CORE_DIGEST=${TEST_CORE_DIGEST%% *}
+export TEST_CORE_DIGEST
+touch "$TEST_ROOT/fail-core-start"
+if sh "$WORK/source/update-core.sh" > "$WORK/core-rollback.log" 2>&1; then
+  echo 'FAIL: core startup failure ignored' >&2
+  exit 1
+fi
+cmp "$WORK/previous-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+test -f "$TEST_ROOT/running"
+test ! -d "$TEST_ROOT/var/lock/krotex-setup.lock"
+echo 'PASS: failed private core startup restores previous binary and process state'
+
+touch "$TEST_ROOT/invalid-config"
+sh "$WORK/source/update.sh" > "$WORK/private-update.log" 2>&1 || { cat "$WORK/private-update.log"; exit 1; }
+cmp "$WORK/previous-core" "$TEST_ROOT/usr/libexec/krotex/xray"
+cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"
+rm "$TEST_ROOT/invalid-config"
+echo 'PASS: application updates validate with and retain the private core'

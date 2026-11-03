@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 . ./package/krotex/files/krotex.init
 
 test_dir="$(mktemp -d)"
-trap 'rm -f "$test_dir/xray" "$test_dir/config.json" "$test_dir/events"; rmdir "$test_dir"' EXIT
+trap 'rm -f "$test_dir/xray" "$test_dir/private-xray" "$test_dir/init" "$test_dir/config.json" "$test_dir/events"; rmdir "$test_dir"' EXIT
 PROG="$test_dir/xray"
 CONF="$test_dir/config.json"
 EVENTS="$test_dir/events"
@@ -41,3 +41,9 @@ grep -q '^param command .* run -config ' "$EVENTS"
 grep -q '^param respawn 3600 5 5$' "$EVENTS"
 grep -q '^close$' "$EVENTS"
 echo 'PASS: config validation and procd registration'
+
+cp "$test_dir/xray" "$test_dir/private-xray"
+sed "s|/usr/libexec/krotex/xray|$test_dir/private-xray|g" package/krotex/files/krotex.init > "$test_dir/init"
+. "$test_dir/init"
+test "$PROG" = "$test_dir/private-xray"
+echo 'PASS: procd service selects the private core when installed'

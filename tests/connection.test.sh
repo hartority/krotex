@@ -44,6 +44,7 @@ echo '203.0.113.25'
 EOF
 cat > "$TEST_ROOT/xray" <<'EOF'
 #!/bin/sh
+[ "${0##*/}" != private-xray ] || touch "$TEST_ROOT/private-core-used"
 test ! -f "$TEST_ROOT/reject-config" || exit 1
 cp "$4" "$TEST_ROOT/generated.json"
 if [ -n "${XRAY_TEST_BINARY:-}" ]; then
@@ -69,6 +70,7 @@ sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/etc/init.d/krotex|$TEST_ROOT/etc/init.d/krotex|g" \
 	-e "s|/var/lock/krotex-setup.lock|$TEST_ROOT/var/lock/krotex-setup.lock|g" \
 	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
+	-e "s|/usr/libexec/krotex/xray|$TEST_ROOT/private-xray|g" \
 	package/luci-app-krotex/root/usr/libexec/krotex/connection > "$WORK/connection"
 . "$RUNTIME/usr/share/libubox/jshn.sh"
 JSON_PREFIX=
@@ -158,6 +160,13 @@ test "$security" = tls
 json_select tlsSettings; json_select alpn; json_get_var alpn 2
 test "$alpn" = http/1.1
 echo 'PASS: TLS configuration includes ALPN'
+
+cp "$TEST_ROOT/xray" "$TEST_ROOT/private-xray"
+call save_connection
+expect_code 0
+test -f "$TEST_ROOT/private-core-used"
+rm "$TEST_ROOT/private-xray"
+echo 'PASS: connection validation uses the private core when installed'
 
 call test_connection
 expect_code 0
