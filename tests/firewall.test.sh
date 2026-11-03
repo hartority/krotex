@@ -449,6 +449,28 @@ probe_blocked blocked.krotex.test https 8443
 probe_section one.krotex.test section-vpn1
 echo 'PASS: Block rejects HTTP, HTTPS and subdomains through real TPROXY while earlier exceptions and other VPN domains remain reachable'
 
+quic_packets() {
+	nft list chain inet krotex "$1" | awk '/udp dport 443/ { for (i=1;i<=NF;i++) if ($i == "packets") print $(i+1) }'
+}
+probe_quic_block() {
+	local client="$1" chain="$2" before after
+	before="$(quic_packets "$chain")"
+	nsenter -t "$client" -n python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b"quic-probe",("93.184.216.34",443)); s.close()'
+	after="$(quic_packets "$chain")"
+	test "$after" -gt "$before"
+}
+probe_quic_block "$LAN" device_prerouting
+probe_quic_block "$OTHER" section_12084
+nsenter -t "$WAN" -n openssl s_server -quiet -www -accept 443 -cert "$WORK/server.crt" -key "$WORK/server.key" > "$WORK/https443.log" 2>&1 &
+PIDS="$PIDS $!"
+sleep 1
+for client in "$LAN" "$OTHER"; do
+	code="$(nsenter -t "$client" -n curl --silent --show-error --noproxy '*' --max-time 6 --cacert "$WORK/server.crt" --resolve 'one.krotex.test:443:93.184.216.34' -o /dev/null -w '%{http_code}' https://one.krotex.test/)"
+	test "$code" = 200
+done
+echo 'PASS: UDP/443 is blocked for common and dedicated VPN devices while HTTPS over TCP/443 works'
+
+
 for number in 1 2; do
 	port=$((11080 + number))
 	before="$(wc -l < "$WORK/sections-client.log")"
@@ -511,6 +533,12 @@ fi
 code="$(nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null -w '%{http_code}' http://192.168.56.1:8080/)"
 test "$code" = 403
 echo 'PASS: device VPN works in all and selected-empty modes, blocks IPv6 bypass and keeps router access direct'
+probe_quic_block "$OTHER" section_12084
+before="$(quic_packets section_12084)"
+nsenter -t "$LAN" -n python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.sendto(b"not-routed",("93.184.216.34",443)); s.close()'
+test "$(quic_packets section_12084)" = "$before"
+echo 'PASS: QUIC blocking remains active for dedicated VPNs with common routing disabled and ignores unselected devices'
+
 
 kill "$VPN1_PID"
 wait "$VPN1_PID" 2>/dev/null || :
