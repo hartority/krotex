@@ -343,8 +343,7 @@ return view.extend({
 				E('p', {}, _('Public IPv4 TCP and UDP traffic follows the sections. Local IPv4 networks and router access remain direct. DNS uses 1.1.1.1 through the default or first enabled Xray section, or directly when none are enabled. Public IPv6 and IPv6 DNS are blocked for routed devices to prevent bypass.')),
 				E('p', {}, _('Save and apply the changes below. Reconnect devices after applying routing changes. Stopping Krotex restores direct access.'))
 			]),
-			E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton ]),
-			this.sectionsEditor.result
+			E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton, this.sectionsEditor.result ])
 		]);
 		this.updateStatus(data);
 		this.refreshRouting();

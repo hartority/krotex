@@ -199,7 +199,12 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           await page.refresh();
           check(page.routingMacs.length===2,'polling overwrote the device draft');
           const settingsActions=document.querySelector('[aria-label="Settings actions"]');
-          check(settingsActions.nextElementSibling===editor.result&&!editor.result.nextElementSibling,'settings actions are not at the bottom');
+          check(!settingsActions.nextElementSibling&&editor.result.parentElement===settingsActions,'settings status is outside the bottom action row');
+          document.body.style.width='1000px';
+          const resetBounds=editor.resetButton.getBoundingClientRect(),statusBounds=editor.result.getBoundingClientRect();
+          check(statusBounds.left>=resetBounds.right&&Math.abs(statusBounds.top-resetBounds.top)<12,'settings status is not beside the buttons');
+          document.body.style.width='320px';
+          check(settingsActions.scrollWidth<=settingsActions.clientWidth+2,'settings status overflows on mobile');
           check(!editor.saveButton.disabled&&!editor.resetButton.disabled,'device draft did not enable Save and Reset');
           const deviceName=page.routingList.querySelector('strong');
           check(deviceName.textContent==='Laptop','device card lacks a readable name');

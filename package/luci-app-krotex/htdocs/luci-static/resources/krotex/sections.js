@@ -338,7 +338,7 @@ return baseclass.extend({
 
 	render: function() {
 		this.cards = E('div', {}, []);
-		this.result = E('p', { 'role': 'status', 'aria-live': 'polite' }, _('Loading sections…'));
+		this.result = E('p', { 'role': 'status', 'aria-live': 'polite', 'style': 'margin:0;flex:1;min-width:12em;overflow-wrap:anywhere' }, _('Loading sections…'));
 		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'style': 'margin-left:auto;flex:0 0 auto', 'click': L.bind(this.add, this) }, _('Add section'));
 		this.fallbackSelect = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Unmatched traffic'),
 			'style': 'min-width:0;max-width:100%', 'change': L.bind(this.handleFallbackChange, this)
