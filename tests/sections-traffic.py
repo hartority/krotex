@@ -45,7 +45,9 @@ sections = [
     {"id": "vpn2", "name": "VPN 2", "enabled": True, "mode": "proxy", "fallback": True,
      "domains": ["two.krotex.test"], "profile": profiles[1]},
     {"id": "deny", "name": "Blocked domains", "enabled": True, "mode": "block", "fallback": False,
-     "domains": ["blocked.krotex.test"]}
+     "domains": ["blocked.krotex.test"]},
+    {"id": "tv", "name": "TV VPN", "enabled": True, "mode": "proxy_devices", "fallback": False,
+     "domains": [], "macs": ["02:66:77:88:99:aa"], "profile": profiles[0]}
 ]
 (work / "sections-request.json").write_text(json.dumps({"sections": json.dumps(sections)}))
 # The second variant has no default VPN: all unmatched traffic must be direct.

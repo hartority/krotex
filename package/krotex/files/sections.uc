@@ -78,9 +78,20 @@ function outbound(profile, tag) {
 	return { tag, protocol: 'vless', settings: { vnext: [{ address: profile.address, port: profile.port, users: [user] }] }, streamSettings: stream };
 }
 
+function device_macs(input) {
+	check(type(input) == 'array' && length(input) <= 128, 'Select up to 128 devices.');
+	let macs = [], seen = {};
+	for (let value in input) {
+		let mac = lc(text(value, 17, 'MAC address'));
+		check(match(mac, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/) && mac != '00:00:00:00:00:00' && !match(mac, /^[0-9a-f][13579bdf]:/), 'Enter a valid unicast device MAC address.');
+		if (!seen[mac]) { seen[mac] = true; push(macs, mac); }
+	}
+	return macs;
+}
+
 function normalize(input) {
 	check(type(input) == 'array' && length(input) <= 32, 'A maximum of 32 sections is supported.');
-	let sections = [], ids = {}, defaults = 0, domain_count = 0;
+	let sections = [], ids = {}, defaults = 0, domain_count = 0, assigned = {}, device_count = 0;
 	for (let item in input) {
 		check(type(item) == 'object', 'Invalid section.');
 		let id = text(item.id, 64, 'section ID');
@@ -88,11 +99,12 @@ function normalize(input) {
 		ids[id] = true;
 		let name = trim(text(item.name, 128, 'section name'));
 		check(length(name), 'Enter a section name.');
-		check(item.mode == 'direct' || item.mode == 'proxy' || item.mode == 'block' || item.mode == 'unconfigured', 'Invalid section mode.');
+		check(item.mode == 'direct' || item.mode == 'proxy' || item.mode == 'proxy_devices' || item.mode == 'block' || item.mode == 'unconfigured', 'Invalid section mode.');
 		check(type(item.enabled) == 'bool' && type(item.fallback) == 'bool', 'Invalid section state.');
 		if (item.mode == 'unconfigured')
 			check(!item.enabled && !item.fallback, 'Choose a section type before enabling it.');
 		if (item.fallback) {
+			check(item.mode != 'proxy_devices', 'A device-specific section cannot be the general default.');
 			check(item.enabled, 'The default section must be enabled.');
 			check(++defaults == 1, 'Only one section can handle unmatched traffic.');
 		}
@@ -116,7 +128,18 @@ function normalize(input) {
 		}
 		let section = { id, name, mode: item.mode, enabled: item.enabled, fallback: item.fallback, domains };
 		if (item.domains_text != null) section.domains_text = item.domains_text;
-		if (item.mode == 'proxy' && (item.enabled || item.profile != null)) section.profile = proxy_profile(item.profile);
+		if (item.mode == 'proxy_devices') {
+			section.macs = device_macs(item.macs);
+			check(!item.enabled || length(section.macs), 'Select at least one device for ' + name + '.');
+			for (let mac in section.macs) {
+				check(!assigned[mac], 'A device can only belong to one device-specific Xray section: ' + mac);
+				check(++device_count <= 128, 'A maximum of 128 assigned devices is supported.');
+				assigned[mac] = true;
+			}
+			section.domains = [];
+			delete section.domains_text;
+		}
+		if ((item.mode == 'proxy' || item.mode == 'proxy_devices') && (item.enabled || item.profile != null)) section.profile = proxy_profile(item.profile);
 		push(sections, section);
 	}
 	return sections;
@@ -129,13 +152,25 @@ function compile(sections) {
 	let inbounds = [{ tag: 'local-socks', listen: '127.0.0.1', port: 10808, protocol: 'socks', settings: { auth: 'noauth', udp: false } }];
 	for (let index, section in sections) {
 		if (!section.enabled) continue;
-		let tag = section.mode == 'proxy' ? 'section-' + section.id : section.mode == 'block' ? 'block' : 'direct';
-		if (section.mode == 'proxy') {
+		let tag = (section.mode == 'proxy' || section.mode == 'proxy_devices') ? 'section-' + section.id : section.mode == 'block' ? 'block' : 'direct';
+		if (section.mode == 'proxy' || section.mode == 'proxy_devices') {
 			push(outbounds, outbound(section.profile, tag));
 			let check_tag = 'section-check-' + section.id;
 			push(inbounds, { tag: check_tag, listen: '127.0.0.1', port: 11080 + index, protocol: 'socks', settings: { auth: 'noauth', udp: false } });
 			push(rules, { type: 'field', inboundTag: [check_tag], outboundTag: tag });
-			if (!dns_profile || section.fallback) dns_profile = section.profile;
+			if (section.mode == 'proxy' && (!dns_profile || section.fallback)) dns_profile = section.profile;
+		}
+		if (section.mode == 'proxy_devices') {
+			let inbound = 'device-section-' + section.id, dns = inbound + '-dns';
+			for (let suffix, port in { traffic: 12080 + index, dns: 12112 + index })
+				push(inbounds, { tag: suffix == 'traffic' ? inbound : dns, listen: '127.0.0.1', port,
+					protocol: 'dokodemo-door', settings: { network: 'tcp,udp', followRedirect: true },
+					streamSettings: { sockopt: { tproxy: 'tproxy' } } });
+			push(outbounds, { tag: dns, protocol: 'freedom', settings: { redirect: '1.1.1.1:53' },
+				streamSettings: { sockopt: { dialerProxy: tag } } });
+			push(rules, { type: 'field', inboundTag: [inbound], outboundTag: tag });
+			push(rules, { type: 'field', inboundTag: [dns], outboundTag: dns });
+			continue;
 		}
 		if (section.fallback) fallback = tag;
 		if (length(section.domains))
@@ -164,12 +199,19 @@ try {
 	check(type(config) == 'object', 'Unable to read the Xray configuration.');
 	if (ARGV[0] == 'read')
 		printf('%J\n', { sections: current_sections(config), legacy: config.krotex_sections == null });
+	else if (ARGV[0] == 'devices') {
+		let routes = [];
+		for (let index, section in normalize(config.krotex_sections || []))
+			if (section.enabled && section.mode == 'proxy_devices')
+				push(routes, { macs: section.macs, port: 12080 + index, dns_port: 12112 + index });
+		printf('%J\n', { routes });
+	}
 	else if (ARGV[0] == 'check') {
 		let request = json(readfile(ARGV[2], 262145));
 		let found = false;
 		for (let index, section in config.krotex_sections || []) {
 			if (section.id != request.id) continue;
-			check(section.enabled && section.mode == 'proxy', 'Choose an enabled Xray section.');
+			check(section.enabled && (section.mode == 'proxy' || section.mode == 'proxy_devices'), 'Choose an enabled Xray section.');
 			printf('%J\n', { port: 11080 + index });
 			found = true;
 			break;

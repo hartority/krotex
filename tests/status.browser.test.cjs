@@ -116,7 +116,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
 
           choose(0,'proxy');
           check(route(0).value==='proxy'&&card(0).querySelector('textarea[aria-label="VLESS link"]').value===link,'cannot switch back to Xray');
-          check(editor.topControls.length===4,'section controls must include one default route selector');
+          check(editor.topControls.length===5,'section controls must include one default route selector');
           check(editor.fallbackSelect.value==='vpn1','saved default VPN was not restored');
           editor.topControls[0].click();
           check(route(1).value==='unconfigured'&&!editor.sections[1].enabled,'new section has a configured route');
@@ -236,6 +236,30 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           editor.sections[0].name='Discard this';editor.changed();
           editor.resetButton.click();await pause();
           check(page.routingMacs.length===2&&!page.routingDirty&&editor.sections[0].name==='Draft exclude'&&!editor.dirty,'Reset did not restore both sections and devices');
+
+          const previousSaves=saveCalls;
+          editor.topControls[4].click();await pause();
+          let deviceCard=editor.deviceCards.children[0];
+          check(!deviceCard.querySelector('[aria-label="Section route"]')&&!deviceCard.querySelector('[aria-label="Domains"]'),'device VPN contains general routing controls');
+          check(!deviceCard.querySelector('[aria-label="Move section up"]'),'device VPN contains ordering arrows');
+          const deviceLink=deviceCard.querySelector('[aria-label="VLESS link"]');
+          deviceLink.value=link;deviceLink.dispatchEvent(new Event('input'));
+          const picker=deviceCard.querySelector('[aria-label="Device VPN device"]');
+          picker.value=mac1;picker.dispatchEvent(new Event('change'));
+          check(editor.deviceCards.textContent.includes('Laptop'),'assigned device has no readable name');
+          check(saveCalls===previousSaves,'device VPN was applied before Save');
+          check(editor.cards.children.length===3&&editor.deviceCards.children.length===1,'device VPN was mixed with general rules');
+          check(!Array.from(editor.fallbackSelect.options).some(option=>option.value===editor.sections[3].id),'device VPN can be selected as a general fallback');
+          editor.saveButton.click();await pause();
+          check(saved[3].mode==='proxy_devices'&&saved[3].macs[0]===mac1&&saved[3].profile.url===link,'unified Save lost the device VPN');
+          check(editor.deviceCards.children[0].querySelector('[aria-label="Configured VLESS server"]'),'saved device VPN did not collapse the link');
+          editor.topControls[4].click();await pause();
+          const duplicate=editor.deviceCards.children[1].querySelector('[aria-label="Device VPN MAC address"]');
+          duplicate.value=mac1;
+          editor.deviceCards.children[1].querySelector('[aria-label="Add device to VPN"]').click();
+          check(editor.result.textContent.includes('already belongs'),'duplicate device assignment was not rejected');
+          editor.resetButton.click();await pause();
+          check(editor.deviceCards.children.length===1&&!editor.dirty,'Reset did not discard the extra device VPN');
           document.body.dataset.testResult='pass';
         } catch(error) { document.body.dataset.testResult='fail'; document.body.append(error.stack); }
       });

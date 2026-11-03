@@ -3,6 +3,8 @@
 . /usr/share/libubox/jshn.sh
 _json_no_warning=1
 CONFIG=/etc/krotex/routing.json
+CORE_CONFIG=/etc/krotex/config.json
+COMPILER=/usr/share/krotex/sections.uc
 STATE=/var/run/krotex/routing-service-active
 POLICY_STATE=/var/run/krotex/policy-owned
 LOCK=/var/lock/krotex-firewall.lock
@@ -131,7 +133,7 @@ lan_devices() {
 }
 
 render() {
-	local entry mac='' count=0 selector devices=''
+	local entry mac='' count=0 selector='' devices='' assigned port dns
 	if [ "${2:-selected}" = all ]; then
 		lan_devices || return 1
 		for entry in $LAN_DEVICES; do devices="${devices:+$devices, }\"$entry\""; done
@@ -142,33 +144,73 @@ render() {
 			count=$((count + 1)); [ "$count" -le 128 ] || return 1
 			mac="${mac:+$mac, }$entry"
 		done
-		[ -n "$mac" ] || return 1
-		mac="{ $mac }"
-		selector="ether saddr $mac"
+		if [ -n "$mac" ]; then selector="ether saddr { $mac }"
+		elif [ -z "${DEVICE_ROUTES:-}" ] || [ ! -s "$DEVICE_ROUTES" ]; then return 1
+		fi
 	fi
 	render_remove
-	# Use a positive MAC or LAN-interface match. A negative Ethernet match does
-	# not exclude loopback packets, which would capture the router's own DNS.
 	cat <<EOF
 add table inet krotex
 add chain inet krotex prerouting { type filter hook prerouting priority -151; policy accept; }
-add chain inet krotex device_prerouting
-add rule inet krotex prerouting $selector jump device_prerouting
-add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10810 accept
-add rule inet krotex device_prerouting fib daddr type { local, broadcast, multicast } return
-add rule inet krotex device_prerouting ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
-add rule inet krotex device_prerouting meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:10809 accept
 add chain inet krotex forward { type filter hook forward priority -5; policy accept; }
-add rule inet krotex forward $selector ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
-add rule inet krotex forward $selector meta nfproto ipv6 counter reject with icmpx type admin-prohibited
 add chain inet krotex input { type filter hook input priority -5; policy accept; }
-add rule inet krotex input $selector meta nfproto ipv6 meta l4proto { tcp, udp } th dport 53 counter reject with icmpx type admin-prohibited
-insert rule inet fw4 input $selector meta mark & 0xffff0000 == 0x4b520000 meta l4proto { tcp, udp } counter accept comment "krotex-tproxy"
 EOF
+	# Specific device captures precede the common device routing rules.
+	if [ -n "${DEVICE_ROUTES:-}" ] && [ -s "$DEVICE_ROUTES" ]; then
+		while IFS='|' read -r assigned port dns; do
+			local members='' device
+			for device in $assigned; do members="${members:+$members, }$device"; done
+			render_capture "ether saddr { $members }" "section_$port" "$port" "$dns"
+		done < "$DEVICE_ROUTES"
+	fi
+	[ -z "$selector" ] || render_capture "$selector" device_prerouting 10809 10810
 	# Existing offloaded connections must re-enter prerouting after selection.
 	if nft list flowtable inet fw4 ft >/dev/null 2>&1; then
 		printf 'flush flowtable inet fw4 ft\n'
 	fi
+}
+
+
+render_capture() {
+	local selector="$1" chain="$2" port="$3" dns="$4"
+	cat <<EOF
+add chain inet krotex $chain
+add rule inet krotex prerouting $selector jump $chain
+add rule inet krotex $chain meta nfproto ipv4 meta l4proto { tcp, udp } th dport 53 meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:$dns accept
+add rule inet krotex $chain fib daddr type { local, broadcast, multicast } return
+add rule inet krotex $chain ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } return
+add rule inet krotex $chain meta nfproto ipv4 meta l4proto { tcp, udp } meta mark set (meta mark & 0x0000ffff) | 0x4b520000 counter tproxy ip to 127.0.0.1:$port accept
+add rule inet krotex forward $selector ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return
+add rule inet krotex forward $selector meta nfproto ipv6 counter reject with icmpx type admin-prohibited
+add rule inet krotex input $selector meta nfproto ipv6 meta l4proto { tcp, udp } th dport 53 counter reject with icmpx type admin-prohibited
+insert rule inet fw4 input $selector meta mark & 0xffff0000 == 0x4b520000 meta l4proto { tcp, udp } counter accept comment "krotex-tproxy"
+EOF
+}
+
+read_device_routes() {
+	local routes route keys members key mac assigned port dns
+	DEVICE_ROUTES="$WORK/device-routes"
+	: > "$DEVICE_ROUTES"
+	[ -f "$CORE_CONFIG" ] || return 0
+	routes="$(ucode "$COMPILER" devices "$CORE_CONFIG")" || return 1
+	json_load "$routes" && json_select routes || return 1
+	json_get_keys routes
+	for route in $routes; do
+		json_select "$route" || return 1
+		json_get_var port port; json_get_var dns dns_port
+		case "$port:$dns" in *[!0-9:]*|:*) return 1 ;; esac
+		[ "$port" -ge 12080 ] && [ "$port" -le 12111 ] && [ "$dns" -ge 12112 ] && [ "$dns" -le 12143 ] || return 1
+		json_select macs || return 1
+		json_get_keys keys
+		assigned=
+		for key in $keys; do
+			json_get_var mac "$key"; valid_mac "$mac" || return 1
+			assigned="${assigned:+$assigned }$mac"
+		done
+		[ -n "$assigned" ] || return 1
+		printf '%s|%s|%s\n' "$assigned" "$port" "$dns" >> "$DEVICE_ROUTES"
+		json_select ..; json_select ..
+	done
 }
 
 remove_rules() {
@@ -182,7 +224,6 @@ apply_rules() {
 	if [ ! -f "$CONFIG" ]; then remove_rules; return; fi
 	json_load "$(cat "$CONFIG")" || return 1
 	json_get_var enabled enabled
-	[ "$enabled" = 1 ] || { remove_rules; return; }
 	[ -f "$STATE" ] || { remove_rules; return; }
 	json_get_var mode mode
 	case "$mode" in ''|selected) mode=selected ;; all) ;; *) error 'Invalid routing mode.'; return 1 ;; esac
@@ -201,10 +242,14 @@ apply_rules() {
 	else
 		[ -z "$kind" ] || return 1
 		json_get_var mac mac
-		valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
-		macs=$mac
+		if [ "$enabled" = 1 ]; then
+			valid_mac "$mac" || { error 'Invalid device MAC address.'; return 1; }
+			macs=$mac
+		fi
 	fi
-	[ "$mode" = all ] || [ -n "$macs" ] || { remove_rules; return; }
+	if [ "$enabled" != 1 ]; then mode=selected; macs=; fi
+	read_device_routes || { error 'Unable to load device-specific routes.'; return 1; }
+	[ "$mode" = all ] || [ -n "$macs" ] || [ -s "$DEVICE_ROUTES" ] || { remove_rules; return; }
 	nft list table inet fw4 >/dev/null 2>&1 || { error 'The fw4 firewall is not running.'; return 1; }
 	render "$macs" "$mode" > "$WORK/rules.nft" || return 1
 	nft -c -f "$WORK/rules.nft" || return 1

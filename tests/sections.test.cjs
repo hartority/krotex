@@ -138,3 +138,33 @@ test('comments persist as editor text and never become Xray domain rules', {skip
   assert.throws(()=>run('compile',[{...section('deny','block'),domains_text:'#comment\nhttps://bad.example/path'}]));
   assert.throws(()=>run('compile',[{...section('deny','block'),domains_text:123}]));
 });
+
+
+test('device VPNs have isolated transparent and DNS routes independent of common rules', {skip:!runtime}, () => {
+  const mac='02:11:22:33:44:55';
+  const device={...section('tv','proxy_devices'),macs:[mac],profile:{...profile}};
+  const config=run('compile',[section('deny','block',['example.com'],true),device]);
+  assert.equal(config.krotex_sections[1].macs[0],mac);
+  const inbound=config.inbounds.find(i=>i.tag==='device-section-tv');
+  assert.equal(inbound.port,12081);assert.equal(inbound.settings.network,'tcp,udp');
+  assert.equal(inbound.streamSettings.sockopt.tproxy,'tproxy');
+  assert.equal(config.routing.rules.find(r=>r.inboundTag.includes('device-section-tv')).outboundTag,'section-tv');
+  assert.equal(config.outbounds.find(o=>o.tag==='device-section-tv-dns').streamSettings.sockopt.dialerProxy,'section-tv');
+  assert.equal(config.outbounds.find(o=>o.tag==='proxy').protocol,'freedom','a private device VPN must not become the general DNS VPN');
+  assert.deepEqual(run('devices',[],config),{routes:[{macs:[mac],port:12081,dns_port:12113}]});
+  assert.equal(run('read',[],config).sections[1].mode,'proxy_devices');
+  assert.throws(()=>run('compile',[{...device,fallback:true}]));
+  assert.throws(()=>run('compile',[{...device,macs:[]}]));
+  assert.throws(()=>run('compile',[device,{...device,id:'other'}]));
+  assert.throws(()=>run('compile',[{...device,macs:['01:11:22:33:44:55']}]));
+  const disabled=run('compile',[{...device,enabled:false}]);
+  assert.deepEqual(run('devices',[],disabled),{routes:[]});
+  assert.equal(disabled.inbounds.some(i=>i.tag==='device-section-tv'),false);
+  if(process.env.XRAY_TEST_BINARY) {
+    const work=mkdtempSync(join(tmpdir(),'krotex-device-'));
+    try {
+      const path=join(work,'config.json');writeFileSync(path,JSON.stringify(config));
+      execFileSync(process.env.XRAY_TEST_BINARY,['run','-test','-config',resolve(__dirname,'../package/krotex/files/transparent.json'),'-config',path],{stdio:'pipe'});
+    } finally {rmSync(work,{recursive:true,force:true});}
+  }
+});

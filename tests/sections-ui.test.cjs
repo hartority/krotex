@@ -252,3 +252,34 @@ test('domain comments, blank lines and spacing survive save and reload',async()=
   assert.equal(editor.sections[0].domains,source);
   assert.equal(controls(editor,'Domains')[0].value,source);
 });
+
+
+test('device VPN cards are separate, persist assigned devices and never become a common default',async()=>{
+  const state=harness(),editor=state.editor;await editor.load();
+  editor.setDevices([{name:'TV',address:'192.168.1.20',mac:'02:11:22:33:44:55'}]);
+  editor.addDeviceVpn();const device=editor.sections[1];device.url=link;
+  editor.assignDevice(device,'02:11:22:33:44:55');
+  assert.equal(editor.deviceCards.children.length,1);assert.equal(editor.cards.children.length,1);
+  assert.equal(controls(editor,'Move section up').length,1);
+  assert.equal(controls(editor,'Section route').length,1);
+  assert.equal(controls(editor,'Domains').length,1);
+  assert.equal(editor.fallbackSelect.children.length,2);
+  await editor.save();
+  assert.equal(state.saved[0][1].mode,'proxy_devices');
+  assert.deepEqual(state.saved[0][1].macs,['02:11:22:33:44:55']);
+  assert.equal(editor.deviceCards.children.length,1);
+  editor.addDeviceVpn();editor.assignDevice(editor.sections[2],'02:11:22:33:44:55');
+  assert.match(editor.result.textContent,/already belongs/);
+  assert.equal(editor.sections[2].macs.length,0);
+  await editor.reset();
+  assert.equal(editor.sections.length,2);
+});
+
+test('general ordering skips device VPN cards and cancellation preserves device changes',async()=>{
+  const {editor}=harness();await editor.load();editor.addDeviceVpn();editor.sections[1].url=link;
+  editor.add();chooseMode(editor,1,'direct');
+  const device=editor.sections[1];editor.move(2,-1);
+  assert.equal(editor.sections[0].mode,'direct');assert.equal(editor.sections[1],device);
+  assert.equal(editor.sections[2].mode,'proxy');
+  editor.move(1,-1);assert.equal(editor.sections[1],device);
+});

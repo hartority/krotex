@@ -110,7 +110,7 @@ write_macs() {
 status() {
 	local active=0 MACS MODE SAVED_ENABLED
 	read_macs || { reply 1 'Invalid saved routing settings.'; return; }
-	"$FIREWALL" status && active=1
+	[ "$SAVED_ENABLED" != 1 ] || { "$FIREWALL" status && active=1; }
 	write_macs "$SAVED_ENABLED"
 	json_add_boolean active "$active"
 	json_dump

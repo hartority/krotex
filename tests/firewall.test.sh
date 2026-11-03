@@ -58,6 +58,8 @@ PATH="$WORK/bin:$PATH"
 export PATH
 sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/etc/krotex/routing.json|$WORK/routing.json|g" \
+	-e "s|/etc/krotex/config.json|$WORK/core-config.json|g" \
+	-e "s|/usr/share/krotex/sections.uc|$(pwd)/package/krotex/files/sections.uc|g" \
 	-e "s|/var/run/krotex/routing-service-active|$WORK/active|g" \
 	-e "s|/var/run/krotex/policy-owned|$WORK/policy-owned|g" \
 	-e "s|/var/lock/krotex-firewall.lock|$WORK/lock/firewall|g" \
@@ -399,12 +401,14 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=vpn.krotex.test' \
 python3 tests/sections-traffic.py "$WORK"
 for index in 1 2; do
 	"$XRAY_TEST_BINARY" run -config "$WORK/vpn$index.json" > "$WORK/vpn$index.log" 2>&1 &
+	[ "$index" != 1 ] || VPN1_PID=$!
 	PIDS="$PIDS $!"
 done
 nsenter -t "$WAN" -n openssl s_server -quiet -www -accept 8443 -cert "$WORK/server.crt" -key "$WORK/server.key" > "$WORK/https.log" 2>&1 &
 PIDS="$PIDS $!"
 ucode package/krotex/files/sections.uc compile "$WORK/client.json" "$WORK/sections-request.json" > "$WORK/sections-client.json"
 python3 tests/sections-traffic.py "$WORK" trust
+cp "$WORK/sections-client.json" "$WORK/core-config.json"
 "$XRAY_TEST_BINARY" run -test -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-validation.log" 2>&1 || { cat "$WORK/sections-validation.log"; exit 1; }
 "$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
 SECTIONS_PID=$!
@@ -472,9 +476,45 @@ kill "$SECTIONS_PID"
 wait "$SECTIONS_PID" 2>/dev/null || :
 ucode package/krotex/files/sections.uc compile "$WORK/client.json" "$WORK/sections-direct-request.json" > "$WORK/sections-client.json"
 python3 tests/sections-traffic.py "$WORK" trust
+cp "$WORK/sections-client.json" "$WORK/core-config.json"
 "$XRAY_TEST_BINARY" run -config package/krotex/files/transparent.json -config "$WORK/sections-client.json" > "$WORK/sections-client.log" 2>&1 &
 PIDS="$PIDS $!"
 sleep 1
 probe_section unmatched.krotex.test direct
 probe_section one.krotex.test section-vpn1
 echo 'PASS: without a default VPN, unmatched traffic is direct while listed sites still use VPN 1'
+
+
+probe_device_vpn() {
+	local before code
+	before="$(wc -l < "$WORK/sections-client.log")"
+	code="$(nsenter -t "$OTHER" -n curl --silent --show-error --noproxy '*' --max-time 6 --resolve 'blocked.krotex.test:8080:93.184.216.34' -o /dev/null -w '%{http_code}' http://blocked.krotex.test:8080/)"
+	test "$code" = 403
+	tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-section-tv (>>|->) section-tv]'
+}
+probe_device_vpn
+before="$(wc -l < "$WORK/sections-client.log")"
+nsenter -t "$OTHER" -n "$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" "$RUNTIME/bin/busybox" nslookup -type=A device.krotex.test 192.168.56.1 > "$WORK/device-vpn-dns" 2>&1
+grep -q '203.0.113.77' "$WORK/device-vpn-dns"
+tail -n "+$((before + 1))" "$WORK/sections-client.log" | grep -Eq 'device-section-tv-dns (>>|->) device-section-tv-dns]'
+echo 'PASS: device VPN overrides general Block and captures its own DNS outside the common device list'
+
+printf '{"enabled":true,"mode":"all","macs":[]}\n' > "$WORK/routing.json"
+fw apply
+probe_device_vpn
+printf '{"enabled":false,"mode":"selected","macs":[]}\n' > "$WORK/routing.json"
+fw apply
+probe_device_vpn
+if nsenter -t "$OTHER" -n curl -6 --silent --noproxy '*' --max-time 3 -o /dev/null 'http://[2001:db8:3::1]:8080/'; then
+	echo 'FAIL: device VPN leaked over IPv6' >&2; exit 1
+fi
+code="$(nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 -o /dev/null -w '%{http_code}' http://192.168.56.1:8080/)"
+test "$code" = 403
+echo 'PASS: device VPN works in all and selected-empty modes, blocks IPv6 bypass and keeps router access direct'
+
+kill "$VPN1_PID"
+wait "$VPN1_PID" 2>/dev/null || :
+if nsenter -t "$OTHER" -n curl --silent --noproxy '*' --max-time 3 --resolve 'blocked.krotex.test:8080:93.184.216.34' -o /dev/null http://blocked.krotex.test:8080/; then
+	echo 'FAIL: device VPN bypassed its failed server' >&2; exit 1
+fi
+echo 'PASS: an unavailable device VPN server does not fall back to direct traffic'

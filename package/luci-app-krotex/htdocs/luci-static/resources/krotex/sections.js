@@ -27,13 +27,13 @@ return baseclass.extend({
 		var pending = this.options.hasPendingChanges && this.options.hasPendingChanges();
 		if (this.saveButton) this.saveButton.disabled = disabled || (!this.dirty && !pending);
 		if (this.resetButton) this.resetButton.disabled = disabled || (!this.dirty && !pending && !this.sections.some(function(section) {
-			return section.mode === 'proxy' && section.editingConnection && section.url;
+			return (section.mode === 'proxy' || section.mode === 'proxy_devices') && section.editingConnection && section.url;
 		}));
 	},
 
 	draftState: function() {
 		return JSON.stringify(this.sections.map(function(section) {
-			return [ section.id, section.name, section.mode, section.enabled, section.fallback, section.domains, section.url ];
+			return [ section.id, section.name, section.mode, section.enabled, section.fallback, section.domains, section.url, section.macs || [] ];
 		}));
 	},
 
@@ -52,7 +52,7 @@ return baseclass.extend({
 				return { id: section.id, name: section.name, mode: section.mode,
 					enabled: section.enabled, fallback: section.fallback,
 					domains: typeof section.domains_text === 'string' ? section.domains_text : (section.domains || []).join('\n'),
-					url: url, editingConnection: !url };
+					url: url, editingConnection: !url, macs: (section.macs || []).slice() };
 			});
 			this.loaded = true;
 			this.legacyDirty = !!data.legacy;
@@ -78,13 +78,71 @@ return baseclass.extend({
 		this.renderCards();
 	},
 
+	addDeviceVpn: function() {
+		if (this.externalBusy || this.saving || !this.loaded || !L.hasViewPermission()) return;
+		if (this.sections.length >= 32) { this.result.textContent = _('A maximum of 32 sections is supported.'); return; }
+		this.sections.push({ id: 'device-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+			name: _('Device VPN'), mode: 'proxy_devices', enabled: true, fallback: false, domains: '', url: '', macs: [], editingConnection: true });
+		this.changed(); this.renderCards();
+	},
+
+	setDevices: function(devices) {
+		this.devices = devices || [];
+		if (this.loaded) this.renderCards();
+	},
+
+	assignDevice: function(section, value) {
+		if (this.externalBusy || this.saving || !L.hasViewPermission()) return;
+		var mac = value.trim().toLowerCase();
+		if (!/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac) || mac === '00:00:00:00:00:00' || (parseInt(mac.slice(0, 2), 16) & 1)) {
+			this.result.textContent = _('Enter a valid device MAC address.'); return;
+		}
+		if ((section.macs || []).indexOf(mac) >= 0) return;
+		if (this.sections.some(function(item) { return item !== section && item.mode === 'proxy_devices' && (item.macs || []).indexOf(mac) >= 0; })) {
+			this.result.textContent = _('This device already belongs to another device VPN.'); return;
+		}
+		section.macs.push(mac);
+		this.result.textContent = '';
+		this.changed(); this.renderCards();
+	},
+
+	renderAssignedDevices: function(section) {
+		var choices = [ E('option', { 'value': '' }, _('Select a device')) ];
+		(this.devices || []).forEach(L.bind(function(device) {
+			var mac = device.mac.toLowerCase();
+			if (this.sections.some(function(item) { return item.mode === 'proxy_devices' && (item.macs || []).indexOf(mac) >= 0; })) return;
+			choices.push(E('option', { 'value': mac }, '%s · %s'.format(device.name === '*' ? mac : device.name, device.address)));
+		}, this));
+		var select = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Device VPN device'),
+			'style': 'max-width:100%;min-width:0',
+			'change': L.bind(function(event) { if (event.target.value) this.assignDevice(section, event.target.value); }, this) }, choices);
+		select.value = '';
+		var manual = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'aria-label': _('Device VPN MAC address'),
+			'placeholder': 'aa:bb:cc:dd:ee:ff', 'style': 'min-width:0;max-width:100%', 'autocomplete': 'off', 'spellcheck': 'false' });
+		var add = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'aria-label': _('Add device to VPN'),
+			'click': L.bind(function() { this.assignDevice(section, manual.value); }, this) }, _('Add device'));
+		this.controls.push(select, manual, add);
+		var rows = (section.macs || []).map(L.bind(function(mac) {
+			var device = (this.devices || []).filter(function(item) { return item.mac.toLowerCase() === mac; })[0];
+			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'aria-label': _('Remove VPN device %s').format(mac),
+				'click': L.bind(function() { section.macs = section.macs.filter(function(item) { return item !== mac; }); this.changed(); this.renderCards(); }, this) }, '\u00d7');
+			this.controls.push(remove);
+			return E('li', { 'style': 'display:flex;align-items:center;justify-content:space-between;gap:.75em;padding:.6em .8em;margin:.5em 0;border:1px solid #8884;border-radius:4px;overflow-wrap:anywhere' }, [
+				E('span', {}, device ? '%s · %s · %s'.format(device.name === '*' ? _('Unnamed device') : device.name, device.address, mac) : mac), remove ]);
+		}, this));
+		return E('div', {}, [
+			E('p', { 'class': 'cbi-value-description' }, _('All external traffic and DNS from these devices use this VPN, independently of Device routing and general rules. Local networks remain direct.')),
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin:.75em 0' }, [ select, manual, add ]),
+			E('ul', { 'style': 'list-style:none;padding:0;margin:.5em 0' }, rows.length ? rows : [ E('li', {}, _('No devices selected.')) ]) ]);
+	},
+
 	move: function(index, offset) {
-		var target = index + offset;
-		if (target < 0 || target >= this.sections.length || this.externalBusy || this.saving) return;
-		var item = this.sections.splice(index, 1)[0];
-		this.sections.splice(target, 0, item);
-		this.changed();
-		this.renderCards();
+		var indices = [];
+		this.sections.forEach(function(section, i) { if (section.mode !== 'proxy_devices') indices.push(i); });
+		var position = indices.indexOf(index), target = indices[position + offset];
+		if (position < 0 || target == null || this.externalBusy || this.saving) return;
+		var item = this.sections[index]; this.sections[index] = this.sections[target]; this.sections[target] = item;
+		this.changed(); this.renderCards();
 	},
 
 	remove: function(index) {
@@ -141,9 +199,11 @@ return baseclass.extend({
 		this.checkOutputs = Object.create(null);
 		this.refreshFallbackOptions();
 		var linkAppearance = 'box-sizing:border-box;margin:0;padding:.6em .85em;background:rgba(127,127,127,.08);border:1px solid #8884;border-radius:6px;font-family:monospace;font-size:inherit;line-height:1.5;overflow-wrap:anywhere';
-		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)', block: 'rgba(217,48,37,.08)' };
+		var backgrounds = { unconfigured: 'rgba(127,127,127,.07)', direct: 'rgba(34,134,58,.07)', proxy: 'rgba(64,158,255,.08)', proxy_devices: 'rgba(64,158,255,.08)', block: 'rgba(217,48,37,.08)' };
+		var generalIndices = [];
+		this.sections.forEach(function(section, i) { if (section.mode !== 'proxy_devices') generalIndices.push(i); });
 		var cards = this.sections.map(L.bind(function(section, index) {
-			var actionRow;
+			var actionRow, deviceVpn = section.mode === 'proxy_devices';
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
 				'maxlength': 128, 'aria-label': _('Section name'), 'style': 'flex:1;min-width:0;width:auto',
 				'input': L.bind(function(event) { section.name = event.target.value; this.changed(); this.refreshFallbackOptions(); }, this) });
@@ -177,19 +237,20 @@ return baseclass.extend({
 				'placeholder': 'youtube.com\ngooglevideo.com\nytimg.com', 'aria-label': _('Domains'), 'spellcheck': 'false',
 				'input': L.bind(function(event) { section.domains = event.target.value; this.changed(); }, this) });
 			domains.value = section.domains;
-			var buttons = [ [ '↑', -1 ], [ '↓', 1 ] ].map(L.bind(function(item) {
+			var buttons = (deviceVpn ? [] : [ [ '↑', -1 ], [ '↓', 1 ] ]).map(L.bind(function(item) {
 				var button = E('button', { 'type': 'button', 'class': 'btn', 'style': 'flex:0 0 auto', 'aria-label': item[1] < 0 ? _('Move section up') : _('Move section down'),
 					'click': L.bind(function() { this.move(index, item[1]); }, this) }, item[0]);
-				button.krotexBoundary = index + item[1] < 0 || index + item[1] >= this.sections.length;
+				button.krotexBoundary = generalIndices.indexOf(index) + item[1] < 0 || generalIndices.indexOf(index) + item[1] >= generalIndices.length;
 				this.controls.push(button);
 				return button;
 			}, this));
 			var remove = E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'style': 'flex:0 0 auto', 'aria-label': _('Remove section'),
 				'click': L.bind(function() { this.remove(index); }, this) }, '×');
-			this.controls.push(name, mode, enabled, domains, remove);
-			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name, enabledSwitch ].concat(buttons, [remove])),
-				E('p', {}, mode) ];
-			if (section.mode === 'proxy') {
+			this.controls.push(name, enabled, remove);
+			if (!deviceVpn) this.controls.push(mode, domains);
+			var fields = [ E('div', { 'style': 'display:flex;align-items:center;gap:.5em;margin-bottom:.7em' }, [ name, enabledSwitch ].concat(buttons, [remove])) ];
+			if (!deviceVpn) fields.push(E('p', {}, mode));
+			if (section.mode === 'proxy' || deviceVpn) {
 				var endpoint;
 				try {
 					var profile = vless.inspect(section.url).profile;
@@ -251,14 +312,18 @@ return baseclass.extend({
 					'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin-top:1em;padding-top:.85em;border-top:1px solid #8884'
 				}, [ test, result ]);
 			}
-			if (section.mode !== 'unconfigured')
+			if (deviceVpn) fields.push(this.renderAssignedDevices(section));
+			else if (section.mode !== 'unconfigured')
 				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains);
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
 			if (actionRow) fields.push(actionRow);
 			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #8886;border-radius:6px;padding:1em;margin:1em 0;background:' + backgrounds[section.mode] }, fields);
 		}, this));
-		this.cards.replaceChildren.apply(this.cards, cards.length ? cards : [ E('p', {}, _('No sections. Unmatched traffic goes directly.')) ]);
+		var generalCards = [], deviceCards = [];
+		cards.forEach(L.bind(function(card, i) { (this.sections[i].mode === 'proxy_devices' ? deviceCards : generalCards).push(card); }, this));
+		this.cards.replaceChildren.apply(this.cards, generalCards.length ? generalCards : [ E('p', {}, _('No sections. Unmatched traffic goes directly.')) ]);
+		this.deviceCards.replaceChildren.apply(this.deviceCards, deviceCards.length ? deviceCards : [ E('p', {}, _('No device VPNs configured.')) ]);
 		this.setState(this.externalBusy, this.available);
 	},
 
@@ -309,7 +374,8 @@ return baseclass.extend({
 		return this.sections.map(function(section) {
 			var data = { id: section.id, name: section.name, mode: section.mode, enabled: section.enabled, fallback: section.fallback, domains_text: section.domains,
 				domains: section.domains.split(/\r?\n/).map(function(line) { return line.trim(); }).filter(function(line) { return line && line.charAt(0) !== '#'; }) };
-			if (section.mode === 'proxy' && (section.enabled || section.url.trim())) {
+			if (section.mode === 'proxy_devices') { data.macs = (section.macs || []).slice(); data.domains = []; delete data.domains_text; }
+			if ((section.mode === 'proxy' || section.mode === 'proxy_devices') && (section.enabled || section.url.trim())) {
 				try { data.profile = vless.inspect(section.url).profile; data.profile.url = section.url.trim(); }
 				catch (error) { throw new Error('%s: %s'.format(section.name, error.message)); }
 			}
@@ -342,6 +408,7 @@ return baseclass.extend({
 
 	render: function() {
 		this.cards = E('div', {}, []);
+		this.deviceCards = E('div', {}, []);
 		this.result = E('p', { 'role': 'status', 'aria-live': 'polite', 'style': 'margin:0;flex:1;min-width:12em;overflow-wrap:anywhere' }, _('Loading sections…'));
 		var addSection = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'style': 'margin-left:auto;flex:0 0 auto', 'click': L.bind(this.add, this) }, _('Add section'));
 		this.fallbackSelect = E('select', { 'class': 'cbi-input-select', 'aria-label': _('Unmatched traffic'),
@@ -350,7 +417,8 @@ return baseclass.extend({
 		this.saveButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-apply cbi-button-positive',
 			'style': 'background:#218739;border-color:#1c7532;color:#fff', 'click': L.bind(this.options.onSave || this.save, this) }, _('Save and apply'));
 		this.resetButton = E('button', { 'type': 'button', 'class': 'btn cbi-button cbi-button-reset', 'click': L.bind(this.options.onReset || this.reset, this) }, _('Reset'));
-		this.topControls = [ addSection, this.saveButton, this.resetButton, this.fallbackSelect ];
+		var addDeviceVpn = E('button', { 'type': 'button', 'class': 'btn cbi-button-action', 'style': 'margin-left:auto', 'click': L.bind(this.addDeviceVpn, this) }, _('Add device VPN'));
+		this.topControls = [ addSection, this.saveButton, this.resetButton, this.fallbackSelect, addDeviceVpn ];
 		this.controls = this.topControls.slice();
 		this.setState(false, this.available);
 		this.load().then(L.bind(function() { if (this.loaded) this.result.textContent = ''; }, this)).catch(function() {});
@@ -360,7 +428,10 @@ return baseclass.extend({
 			E('p', {}, _('Rules apply according to the device routing mode below. Domains are detected from HTTP, TLS and QUIC; connections without a visible hostname use the default route.')),
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em 1em;margin:1em 0' }, [
 				E('label', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;min-width:0;max-width:100%' }, [ _('Unmatched traffic'), this.fallbackSelect ]), addSection
-			]), this.cards
+			]), this.cards,
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.75em;margin-top:1.5em' }, [ E('h3', { 'style': 'margin:0' }, _('VPN for devices')), addDeviceVpn ]),
+			E('p', {}, _('Each device VPN handles all external traffic from its assigned devices and takes priority over general rules.')),
+			this.deviceCards
 		].concat(this.options.externalActions ? [] : [
 			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.saveButton, this.resetButton ]), this.result
 		]));

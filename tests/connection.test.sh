@@ -578,3 +578,20 @@ test "$domain" = example.com
 json_load "$(cat "$TEST_ROOT/etc/krotex/config.json")"; json_select routing; json_select rules; json_select 2; json_select domain; json_get_var domain 1
 test "$domain" = domain:example.com
 echo 'PASS: unified save preserves commented domain text while Xray only receives active domains'
+
+
+sections="[{\"id\":\"tv\",\"name\":\"TV VPN\",\"mode\":\"proxy_devices\",\"enabled\":true,\"fallback\":false,\"domains\":[],\"macs\":[\"02:11:22:33:44:55\"],\"profile\":$profile}]"
+settings_request
+call_sections save_settings; expect_code 0
+call_sections sections
+json_load "$(cat "$WORK/result")"; json_select sections; json_select 1
+json_get_var mode mode; test "$mode" = proxy_devices
+json_select macs; json_get_var mac 1; test "$mac" = 02:11:22:33:44:55
+printf '{"id":"tv"}\n' > "$WORK/request"
+call_sections test_section; expect_code 0
+cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/device-saved"
+sections="$(printf '%s' "$sections" | sed 's/"fallback":false/"fallback":true/')"
+settings_request
+call_sections save_settings; expect_code 1
+cmp "$WORK/device-saved" "$TEST_ROOT/etc/krotex/config.json"
+echo 'PASS: unified settings persists device VPNs, supports their connection checks and rejects an invalid general default'

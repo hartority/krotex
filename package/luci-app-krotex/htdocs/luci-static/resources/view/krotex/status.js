@@ -148,6 +148,7 @@ return view.extend({
 	refreshDevices: function() {
 		return callDevices().then(L.bind(function(data) {
 			this.devices = data.devices || [];
+			if (this.sectionsEditor && this.sectionsEditor.setDevices) this.sectionsEditor.setDevices(this.devices);
 			var options = [ E('option', { 'value': '' }, _('Select a DHCP device')) ];
 			(data.devices || []).forEach(function(device) {
 				options.push(E('option', { 'value': device.mac }, '%s · %s · %s'.format(
