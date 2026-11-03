@@ -112,7 +112,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(getComputedStyle(output).color==='rgb(217, 48, 37)','connection error is not red');
           check(!editor.result.textContent.includes('Proxy connection failed'),'connection error appeared below all sections');
           const domainsLabel=Array.from(card(1).querySelectorAll('label')).find(l=>l.textContent.startsWith('Domains'));
-          check(domainsLabel.getBoundingClientRect().y>=checkButton.parentElement.getBoundingClientRect().bottom,'domains label shares the check row');
+          check(checkButton.parentElement===card(1).lastElementChild,'section actions are not the final row');
+          check(checkButton.parentElement.getBoundingClientRect().y>domainsLabel.getBoundingClientRect().bottom,'section actions appear above the domain settings');
           checkFailure=false;
           checkButton.click();await pause();
           check(output.textContent.includes('203.0.113.10'),'successful check did not replace the error');
@@ -125,11 +126,16 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           const domainBox=card(2).querySelector('textarea[aria-label="Domains"]');
           check(defaultLabel.getBoundingClientRect().top-domainBox.getBoundingClientRect().bottom>=10,'default option lacks padding below domains');
           document.body.style.width='1000px';
+          const heading=page.pageHeader.querySelector('h2').getBoundingClientRect();
+          const actions=page.serviceActions.getBoundingClientRect();
+          check(actions.left>heading.right&&Math.abs(actions.y-heading.y)<30,'service controls are not beside the heading');
+          check(page.pageHeader.getBoundingClientRect().bottom<=page.statsPanel.getBoundingClientRect().top,'service controls remain under the statistics');
           check(page.statsPanel.getBoundingClientRect().height<100,'desktop statistics are too tall');
           check(page.statsPanel.querySelectorAll('dt').length===7,'statistics lost a metric');
           document.body.style.width='320px';
           check(page.statsPanel.scrollWidth<=page.statsPanel.clientWidth+2,'statistics overflow on mobile');
           check(page.statsPanel.getBoundingClientRect().height<240,'mobile statistics are too tall');
+          check(page.pageHeader.scrollWidth<=page.pageHeader.clientWidth+2,'service controls overflow on mobile');
           page.deviceSelect.value=mac1;
           page.deviceSelect.dispatchEvent(new Event('change'));
           await pause();
@@ -146,6 +152,8 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           page.routingMode.value='all';page.routingMode.dispatchEvent(new Event('change'));await pause();
           check(routingMode==='all'&&getComputedStyle(page.deviceSelection).display==='none','all mode did not hide device selection');
           check(getComputedStyle(page.allDevicesNotice).display!=='none','all mode lacks a description');
+          check(getComputedStyle(page.allDevicesNotice).borderLeftWidth===getComputedStyle(page.allDevicesNotice).borderRightWidth,'notice still has a thick left border');
+          check(page.routingSummary.getBoundingClientRect().top-page.routingMode.getBoundingClientRect().bottom>=10,'routing status touches the mode selector');
           page.routingMode.value='selected';page.routingMode.dispatchEvent(new Event('change'));await pause();
           check(macs.length===2&&page.routingList.children.length===2,'switching modes lost the saved device list');
           page.routingRemoveButtons[0].click();

@@ -108,6 +108,7 @@ return baseclass.extend({
 		this.controls = this.topControls.slice();
 		this.checkOutputs = Object.create(null);
 		var cards = this.sections.map(L.bind(function(section, index) {
+			var actionRow;
 			var name = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': section.name,
 				'maxlength': 128, 'aria-label': _('Section name'), 'style': 'flex:1;min-width:0;width:auto',
 				'input': L.bind(function(event) { section.name = event.target.value; this.changed(); }, this) });
@@ -194,7 +195,9 @@ return baseclass.extend({
 				var previous = this.checkResults[section.id];
 				if (previous) this.setCheckResult(section.id, previous.text, previous.error);
 				this.controls.push(test);
-				fields.push(E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin:.5em 0 1em' }, [ test, result ]));
+				actionRow = E('div', { 'aria-label': _('Section actions'),
+					'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em 1em;margin-top:1em;padding-top:.85em;border-top:1px solid #8884'
+				}, [ test, result ]);
 			}
 			if (section.mode !== 'unconfigured')
 				fields.push(E('label', { 'style': 'display:block;margin:.5em 0 .25em' }, _('Domains (one per line, including subdomains)')), domains,
@@ -203,6 +206,7 @@ return baseclass.extend({
 					]));
 			else
 				fields.push(E('p', { 'class': 'cbi-value-description' }, _('Choose a section type to configure routing.')));
+			if (actionRow) fields.push(actionRow);
 			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #8886;border-radius:6px;padding:1em;margin:1em 0' }, fields);
 		}, this));
 		this.cards.replaceChildren.apply(this.cards, cards.length ? cards : [ E('p', {}, _('No sections. Unmatched traffic goes directly.')) ]);

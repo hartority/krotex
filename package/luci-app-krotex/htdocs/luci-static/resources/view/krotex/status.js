@@ -207,9 +207,9 @@ return view.extend({
 			'change': ui.createHandlerFn(this, 'handleRoutingMode')
 		}, [ E('option', { 'value': 'selected' }, _('Selected devices')), E('option', { 'value': 'all' }, _('All LAN devices')) ]);
 		this.routingMode.value = 'selected';
-		this.allDevicesNotice = E('div', { 'style': 'display:none;margin:1em 0;padding:1em;border:1px solid #409eff66;border-left:3px solid #409eff;border-radius:8px;background:rgba(64,158,255,.08)' },
+		this.allDevicesNotice = E('div', { 'style': 'display:none;margin:1em 0;padding:1em;border:1px solid #409eff66;border-radius:8px;background:rgba(64,158,255,.08)' },
 			_('All devices in the LAN firewall zone follow the routing sections, including newly connected devices. Your selected-device list is preserved.'));
-		this.routingSummary = E('p', {}, _('Loading device routing…'));
+		this.routingSummary = E('p', { 'style': 'margin:.75em 0 1em' }, _('Loading device routing…'));
 		this.routingResult = E('p', { 'role': 'status', 'aria-live': 'polite' }, '');
 		this.routingMac = E('input', {
 			'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff',
@@ -271,21 +271,26 @@ return view.extend({
 		].map(L.bind(function(action) {
 			var button = E('button', {
 				'class': 'btn cbi-button-action',
-				'style': 'margin:0 .5em .5em 0',
+				'style': 'margin:0',
 				'click': ui.createHandlerFn(this, 'handleAction', action[0])
 			}, action[1]);
 			this.buttons.push(button);
 			return button;
 		}, this));
+		this.serviceActions = E('div', { 'aria-label': _('Service controls'),
+			'style': 'display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:.5em;max-width:100%'
+		}, actions);
+		this.pageHeader = E('div', { 'style': 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75em 1em;margin-bottom:.75em' }, [
+			E('h2', { 'style': 'margin:0' }, _('Krotex')), this.serviceActions
+		]);
 
 		this.sectionsEditor = sections.create({
 			onBusy: L.bind(function(busy) { this.busy = busy; this.updateStatus(this.lastStatus); }, this),
 			onApplied: L.bind(this.refresh, this)
 		});
 		var page = E('div', {}, [
-			E('h2', {}, _('Krotex')),
+			this.pageHeader,
 			this.statsPanel,
-			E('div', { 'class': 'cbi-section' }, actions),
 			this.sectionsEditor.render(),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, _('Device routing')),
