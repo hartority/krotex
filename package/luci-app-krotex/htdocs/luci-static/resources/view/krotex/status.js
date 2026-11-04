@@ -22,6 +22,7 @@ var callAction = rpc.declare({
 
 var callDevices = rpc.declare({ object: 'krotex', method: 'devices', expect: { '': {} } });
 var callRouting = rpc.declare({ object: 'krotex', method: 'routing', expect: { '': {} } });
+var callXrayConfig = rpc.declare({ object: 'krotex', method: 'xray_config', params: [ 'reveal' ], expect: { '': {} } });
 var callSaveSettings = rpc.declare({ object: 'krotex', method: 'save_settings', params: [ 'sections', 'routing' ], expect: { '': {} } });
 
 return view.extend({
@@ -227,9 +228,101 @@ return view.extend({
 		}, this));
 	},
 
+	loadXrayConfig: function(reveal) {
+		var panel = this.configPreview;
+		var request = {};
+		panel.request = request;
+		panel.revealed = reveal;
+		panel.code.textContent = '';
+		panel.copy.disabled = panel.toggle.disabled = true;
+		panel.status.textContent = _('Loading Xray configuration…');
+		return callXrayConfig(reveal).then(function(data) {
+			if (panel.request !== request) return;
+			if (!data.config || typeof data.config !== 'object') throw new Error();
+			var json = JSON.stringify(data.config, null, 2);
+			var tokens = /("(?:\\.|[^"\\])*")(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|\b(?:true|false|null)\b/gi;
+			var fragment = document.createDocumentFragment();
+			var match, end = 0;
+			while ((match = tokens.exec(json)) !== null) {
+				fragment.appendChild(document.createTextNode(json.slice(end, match.index)));
+				var style = match[1] ? 'font-weight:600' : match[0][0] === '"' ? 'color:#368454' : 'color:#507eb2';
+				fragment.appendChild(E('span', { style: style }, [ document.createTextNode(match[0]) ]));
+				end = tokens.lastIndex;
+			}
+			fragment.appendChild(document.createTextNode(json.slice(end)));
+			panel.code.appendChild(fragment);
+			panel.toggle.textContent = reveal ? _('Hide credentials') : _('Show credentials');
+			panel.status.textContent = reveal ? _('Credentials are visible.') : _('Credentials are hidden.');
+			panel.copy.disabled = false;
+		}).catch(function() {
+			if (panel.request !== request) return;
+			panel.revealed = false;
+			panel.toggle.textContent = _('Show credentials');
+			panel.status.textContent = _('Unable to load the Xray configuration.');
+		}).then(function() {
+			if (panel.request === request) panel.toggle.disabled = false;
+		});
+	},
+
+	renderXrayConfig: function() {
+		var panel = this.configPreview = {};
+		panel.status = E('span', { 'role': 'status' });
+		panel.code = E('code', {});
+		panel.copy = E('button', {
+			'type': 'button', 'class': 'btn cbi-button cbi-button-action',
+			'click': function() {
+				var text = panel.code.textContent;
+				var request = panel.request;
+				var report = function(message) {
+					if (panel.request === request) panel.status.textContent = message;
+				};
+				if (navigator.clipboard && navigator.clipboard.writeText) {
+					navigator.clipboard.writeText(text).then(function() {
+						report(_('Copied.'));
+					}, function() { report(_('Unable to copy. Select the JSON to copy it manually.')); });
+					return;
+				}
+				// LuCI is also served over HTTP, where the Clipboard API is unavailable.
+				var selection = window.getSelection();
+				var range = document.createRange();
+				range.selectNodeContents(panel.code);
+				selection.removeAllRanges();
+				selection.addRange(range);
+				var copied = false;
+				try { copied = document.execCommand('copy'); } catch (error) { /* Leave the JSON selected. */ }
+				if (copied) selection.removeAllRanges();
+				report(copied ? _('Copied.') : _('JSON selected. Press Ctrl+C to copy.'));
+			}
+		}, _('Copy JSON'));
+		panel.toggle = E('button', {
+			'type': 'button', 'class': 'btn cbi-button cbi-button-action',
+			'click': L.bind(function() { return this.loadXrayConfig(!panel.revealed); }, this)
+		}, _('Show credentials'));
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, _('Xray configuration')),
+			E('p', {}, _('Merged Xray configuration from the saved settings. OpenWrt firewall rules are managed separately.')),
+			E('div', { 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-bottom:.75em' }, [
+				panel.copy, panel.toggle, panel.status
+			]),
+			E('pre', {
+				'tabindex': '0', 'aria-label': _('Xray configuration JSON'),
+				'style': 'max-height:65vh;overflow:auto;padding:1em;border:1px solid var(--border-color-medium,#7776);border-radius:.35em'
+			}, [ panel.code ])
+		]);
+	},
+
 	showTab: function(name, focus) {
 		if (!this.tabPanels[name]) return;
+		var previous = this.activeTab;
 		this.activeTab = name;
+		if (name !== previous) {
+			if (name === 'config') this.loadXrayConfig(false);
+			else if (previous === 'config') {
+				this.configPreview.request = null;
+				this.configPreview.code.textContent = '';
+			}
+		}
+		this.settingsActions.style.display = name === 'config' ? 'none' : 'flex';
 		if (this.connectionChecker) this.connectionChecker.setVisible(name === 'overview');
 		Object.keys(this.tabPanels).forEach(L.bind(function(key) {
 			var selected = key === name;
@@ -350,11 +443,12 @@ return view.extend({
 					E('p', {}, _('Save and apply the changes below. Reconnect devices after applying routing changes. Stopping Krotex restores direct access.'))
 				])
 			]),
-			devices: E('section', { 'id': 'krotex-devices', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-devices' }, [ this.sectionsEditor.devicePanel ])
+			devices: E('section', { 'id': 'krotex-devices', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-devices' }, [ this.sectionsEditor.devicePanel ]),
+			config: E('section', { 'id': 'krotex-config', 'role': 'tabpanel', 'aria-labelledby': 'krotex-tab-config' }, [ this.renderXrayConfig() ])
 		};
 		this.tabButtons = {};
 		this.tabItems = {};
-		var tabs = [ [ 'overview', _('Overview') ], [ 'default', _('Smart routing') ], [ 'devices', _('Device routing') ] ];
+		var tabs = [ [ 'overview', _('Overview') ], [ 'default', _('Smart routing') ], [ 'devices', _('Device routing') ], [ 'config', _('Xray Config') ] ];
 		var tabBar = E('ul', { 'class': 'cbi-tabmenu', 'role': 'tablist', 'aria-label': _('Krotex pages'), 'style': 'display:flex;flex-wrap:wrap' }, tabs.map(L.bind(function(tab, index) {
 			var link = E('a', { 'href': '#krotex-' + tab[0], 'id': 'krotex-tab-' + tab[0], 'role': 'tab', 'aria-controls': 'krotex-' + tab[0],
 				'click': L.bind(function(event) { event.preventDefault(); this.showTab(tab[0]); }, this),
@@ -373,10 +467,11 @@ return view.extend({
 			this.tabItems[tab[0]] = item;
 			return item;
 		}, this)));
+		this.settingsActions = E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' },
+			[ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton, this.sectionsEditor.result ]);
 		var page = E('div', { 'style': 'padding-bottom:1.5em' }, [
 			E('h2', {}, _('Krotex')), tabBar,
-			this.tabPanels.overview, this.tabPanels.default, this.tabPanels.devices,
-			E('div', { 'aria-label': _('Settings actions'), 'style': 'display:flex;align-items:center;flex-wrap:wrap;gap:.5em;margin-top:1em' }, [ this.sectionsEditor.saveButton, this.sectionsEditor.resetButton, this.sectionsEditor.result ])
+			this.tabPanels.overview, this.tabPanels.default, this.tabPanels.devices, this.tabPanels.config, this.settingsActions
 		]);
 		this.showTab('overview');
 		this.updateStatus(data);

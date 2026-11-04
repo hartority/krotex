@@ -3,7 +3,7 @@
     "description": "Read Krotex status and control its service",
     "read": {
       "ubus": {
-        "krotex": ["status", "connection", "devices", "routing", "sections", "connections"]
+        "krotex": ["status", "connection", "devices", "routing", "sections", "connections", "xray_config"]
       }
     },
     "write": {

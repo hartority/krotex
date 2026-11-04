@@ -203,6 +203,15 @@ function firewall_policy(sections) {
 	return join('\n', lines) + '\n';
 }
 
+function redact_config(value) {
+	if (type(value) == 'array') return map(value, redact_config);
+	if (type(value) != 'object') return value;
+	for (let key, item in value)
+		value[key] = index(['id', 'password', 'publickey', 'privatekey', 'shortid', 'shortids', 'spiderx'], lc(key)) >= 0
+			? '[redacted]' : redact_config(item);
+	return value;
+}
+
 function compile(sections) {
 	let rules = [{ type: 'field', inboundTag: ['device-dns'], outboundTag: 'device-dns-proxy' }];
 	let outbounds = [], dns_profile = null, fallback = 'direct';
@@ -257,7 +266,12 @@ function compile(sections) {
 try {
 	let config = json(readfile(ARGV[1]));
 	check(type(config) == 'object', 'Unable to read the Xray configuration.');
-	if (ARGV[0] == 'read')
+	if (ARGV[0] == 'preview') {
+		delete config.krotex_sections;
+		delete config.krotex_link;
+		printf('%J\n', { config: ARGV[2] == '1' ? config : redact_config(config) });
+	}
+	else if (ARGV[0] == 'read')
 		printf('%J\n', { sections: current_sections(config), legacy: config.krotex_sections == null });
 	else if (ARGV[0] == 'firewall')
 		print(firewall_policy(normalize(current_sections(config))));

@@ -230,6 +230,9 @@ sed -e "s|/usr/share/libubox/jshn.sh|$RUNTIME/usr/share/libubox/jshn.sh|g" \
 	-e "s|/etc/krotex/source-version|$TEST_ROOT/etc/krotex/source-version|g" \
 	-e "s|/etc/init.d/krotex|$TEST_ROOT/etc/init.d/krotex|g" \
 	-e "s|/usr/bin/xray|$TEST_ROOT/xray|g" \
+	-e "s|/etc/krotex/config.json|$TEST_ROOT/etc/krotex/config.json|g" \
+	-e "s|/usr/share/krotex/transparent.json|$WORK/transparent.json|g" \
+	-e "s|/usr/share/krotex/sections.uc|$(pwd)/package/krotex/files/sections.uc|g" \
 	package/luci-app-krotex/root/usr/libexec/rpcd/krotex > "$WORK/rpc"
 mkdir -p "$TEST_ROOT/usr/share/krotex"
 printf '0.8.1\n' > "$TEST_ROOT/usr/share/krotex/version"
@@ -599,6 +602,34 @@ json_select macs; json_get_var mac 1; test "$mac" = 02:11:22:33:44:55
 printf '{"id":"tv"}\n' > "$WORK/request"
 call_sections test_section; expect_code 0
 cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/device-saved"
+if [ -n "${XRAY_TEST_BINARY:-}" ]; then
+	for reveal in false true; do
+		printf '{"reveal":%s}\n' "$reveal" |
+			"$RUNTIME/lib/ld-musl-x86_64.so.1" --library-path "$RUNTIME/lib:$RUNTIME/usr/lib" \
+				"$RUNTIME/bin/busybox" ash "$WORK/rpc" call xray_config > "$WORK/preview-$reveal"
+	done
+	"$XRAY_TEST_BINARY" run -dump -config "$WORK/transparent.json" -config "$TEST_ROOT/etc/krotex/config.json" > "$WORK/merged"
+	python3 - "$WORK" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+work = Path(sys.argv[1])
+hidden = json.loads((work / "preview-false").read_text())["config"]
+revealed = json.loads((work / "preview-true").read_text())["config"]
+merged = json.loads((work / "merged").read_text())
+assert revealed == merged, [key for key in merged if revealed.get(key) != merged[key]]
+assert {"device-tproxy", "device-dns", "local-socks", "device-section-tv"} <= {item["tag"] for item in hidden["inbounds"]}
+for outbound in revealed["outbounds"]:
+    if outbound["protocol"] == "vless":
+        user = outbound["settings"]["vnext"][0]["users"][0]
+        assert user["id"] not in json.dumps(hidden)
+        user["id"] = "[redacted]"
+assert revealed == hidden
+PY
+	cmp "$WORK/device-saved" "$TEST_ROOT/etc/krotex/config.json"
+	echo 'PASS: config preview returns the real Xray merge and hides credentials by default'
+fi
 sections="$(printf '%s' "$sections" | sed 's/"fallback":false/"fallback":true/')"
 settings_request
 call_sections save_settings; expect_code 1

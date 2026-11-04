@@ -52,6 +52,16 @@ status() {
 	json_dump
 }
 
+xray_config() {
+	local request kind reveal=0
+	read -r request
+	json_load "$request" || return 2
+	json_get_type kind reveal
+	[ "$kind" != boolean ] || json_get_var reveal reveal
+	"$PROG" run -dump -config /usr/share/krotex/transparent.json -config /etc/krotex/config.json 2>/dev/null |
+		ucode /usr/share/krotex/sections.uc preview /dev/stdin "$reveal" 2>/dev/null
+}
+
 action() {
 	local request action code
 	read -r request
@@ -78,10 +88,11 @@ action() {
 }
 
 case "$1" in
-	list) echo '{"status":{},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{},"devices":{},"routing":{},"set_routing":{"mac":"str","enabled":"bool"},"set_routing_mode":{"mode":"str"},"sections":{},"connections":{},"test_profile":{"id":"str"},"save_sections":{"sections":"str"},"save_settings":{"sections":"str","routing":"str"},"test_section":{"id":"str"}}' ;;
+	list) echo '{"status":{},"xray_config":{"reveal":"bool"},"action":{"action":"str"},"connection":{},"save_connection":{"profile":"str"},"test_connection":{},"devices":{},"routing":{},"set_routing":{"mac":"str","enabled":"bool"},"set_routing_mode":{"mode":"str"},"sections":{},"connections":{},"test_profile":{"id":"str"},"save_sections":{"sections":"str"},"save_settings":{"sections":"str","routing":"str"},"test_section":{"id":"str"}}' ;;
 	call)
 		case "$2" in
 			status) status ;;
+			xray_config) xray_config ;;
 			action) action ;;
 			connection|save_connection|test_connection) exec /usr/libexec/krotex/connection "$2" ;;
 			devices|routing|set_routing|set_routing_mode) exec /usr/libexec/krotex/routing "$2" ;;

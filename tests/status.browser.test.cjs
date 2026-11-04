@@ -55,6 +55,7 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
         }
         if(spec.method==='test_profile') return {code:0,ip:'203.0.113.20',latency_ms:83};
         if(spec.method==='sections') return {sections:saved};
+        if(spec.method==='xray_config') return {config:{outbounds:[{id:mac?'visible-credential':'[redacted]',tag:'<example>'}]}};
         if(spec.method==='save_settings') {
           saveCalls++;
           if(saveFailure)return {code:1,message:'Settings rejected'};
@@ -83,6 +84,21 @@ test('sections, full VLESS links and multiple devices work in Chromium', () => {
           check(page.connectionChecker.list.children.length===1,'overview connection list is missing');
           check(page.connectionChecker.list.textContent.includes('proxy.example:443')&&page.connectionChecker.list.textContent.includes('Working. Exit IP: 203.0.113.20'),'overview did not automatically check its connection');
           check(page.connectionChecker.list.textContent.includes('Latency: 83 ms'),'overview omitted the measured latency');
+          page.tabButtons.config.click();await pause();
+          const preview=page.configPreview;
+          check(preview.code.textContent.includes('[redacted]')&&preview.code.textContent.includes('<example>'),'merged JSON did not open redacted');
+          check(preview.code.querySelector('span')&&!preview.code.querySelector('example'),'JSON was not highlighted as text');
+          check(getComputedStyle(page.settingsActions).display==='none','read-only tab shows save actions');
+          let copiedJson;
+          Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{copiedJson=text;}}});
+          preview.copy.click();await pause();
+          check(JSON.parse(copiedJson).outbounds[0].id==='[redacted]','Copy JSON did not copy the displayed redacted config');
+          preview.toggle.click();await pause();
+          check(preview.code.textContent.includes('visible-credential'),'credentials were not revealed');
+          page.tabButtons.default.click();await pause();
+          check(!preview.code.textContent,'hidden tab retained credentials');
+          page.tabButtons.config.click();await pause();
+          check(!preview.code.textContent.includes('visible-credential'),'reopened tab revealed credentials');
           page.tabButtons.default.click();await pause();
           check(page.activeTab==='default'&&getComputedStyle(page.tabPanels.overview).display==='none','Default routing did not open');
           check(!document.body.textContent.includes('nullnull'),'null children are rendered below the sections');
