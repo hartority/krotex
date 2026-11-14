@@ -172,6 +172,14 @@ generate() {
 	json_add_object ''
 	json_add_string tag proxy
 	json_add_string protocol vless
+	json_add_object mux
+	json_add_boolean enabled 1
+	if [ "$flow" = xtls-rprx-vision ]; then json_add_int concurrency -1
+	else json_add_int concurrency 32
+	fi
+	json_add_int xudpConcurrency 256
+	json_add_string xudpProxyUDP443 reject
+	json_close_object
 	json_add_object settings
 	json_add_array vnext
 	json_add_object ''

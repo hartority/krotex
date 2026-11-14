@@ -179,6 +179,9 @@ fi
 # Check the preserved config before stopping the existing process.
 CONFIG="$SYSROOT/etc/krotex/config.json"
 [ -f "$CONFIG" ] || CONFIG="$CORE/config.json"
+ucode "$CORE/sections.uc" defaults "$CONFIG" > "$WORK/config.json"
+chmod 0600 "$WORK/config.json"
+CONFIG="$WORK/config.json"
 PROG="$SYSROOT/usr/bin/xray"
 [ ! -x "$SYSROOT/usr/libexec/krotex/xray" ] || PROG="$SYSROOT/usr/libexec/krotex/xray"
 CORE_VERSION="$(sed -n 's/^VERSION=//p' "$SOURCE/update-core.sh")"
@@ -266,9 +269,7 @@ copy_file "$LUCI/htdocs/luci-static/resources/krotex/vless.js" "$SYSROOT/www/luc
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/sections.js" "$SYSROOT/www/luci-static/resources/krotex/sections.js" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/connections.js" "$SYSROOT/www/luci-static/resources/krotex/connections.js" 0644
 copy_file "$LUCI/htdocs/luci-static/resources/krotex/devicecard.js" "$SYSROOT/www/luci-static/resources/krotex/devicecard.js" 0644
-if [ ! -f "$SYSROOT/etc/krotex/config.json" ]; then
-	copy_file "$CORE/config.json" "$SYSROOT/etc/krotex/config.json" 0600
-fi
+copy_file "$CONFIG" "$SYSROOT/etc/krotex/config.json" 0600
 if [ ! -f "$SYSROOT/etc/krotex/routing.json" ]; then
 	copy_file "$CORE/routing.json" "$SYSROOT/etc/krotex/routing.json" 0600
 fi

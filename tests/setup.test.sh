@@ -39,6 +39,16 @@ cat > "$WORK/bin/sleep" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
+cat > "$WORK/bin/ucode" <<'EOF'
+#!/bin/sh
+if [ -n "${OPENWRT_TEST_ROOT:-}" ]; then
+  exec "$OPENWRT_TEST_ROOT/lib/ld-musl-x86_64.so.1" \
+    --library-path "$OPENWRT_TEST_ROOT/lib:$OPENWRT_TEST_ROOT/usr/lib" \
+    "$OPENWRT_TEST_ROOT/usr/bin/ucode" -L "$OPENWRT_TEST_ROOT/usr/lib/ucode" "$@"
+fi
+# Packaging-only tests mock config generation along with the Xray binary.
+cat "$3"
+EOF
 cat > "$WORK/bin/tar" <<'EOF'
 #!/bin/sh
 # Model OpenWrt's minimal BusyBox tar, which has no GNU long options.
@@ -313,3 +323,25 @@ cmp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
 rmdir "$TEST_ROOT/var/lock/krotex-setup.lock"
 mv "$WORK/temporarily-hidden.init" "$TEST_ROOT/etc/init.d/krotex"
 echo 'PASS: preparation needs no installed init script and retains the parent update lock'
+
+if [ -n "${OPENWRT_TEST_ROOT:-}" ]; then
+  printf '%s\n' '{"custom":true,"outbounds":[{"protocol":"vless","settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}]}' > "$TEST_ROOT/etc/krotex/config.json"
+  cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/pre-mux.json"
+  touch "$TEST_ROOT/fail-rpcd"
+  if sh "$WORK/source/update.sh" > "$WORK/mux-rollback.log" 2>&1; then
+    echo 'FAIL: migrated config deployment failure ignored' >&2
+    exit 1
+  fi
+  cmp "$WORK/pre-mux.json" "$TEST_ROOT/etc/krotex/config.json"
+  sh "$WORK/source/update.sh" > "$WORK/mux-update.log" 2>&1 || { cat "$WORK/mux-update.log"; exit 1; }
+  python3 - "$TEST_ROOT/etc/krotex/config.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1]) as source:
+    config = json.load(source)
+assert config["custom"] is True
+assert config["outbounds"][0]["mux"] == dict(enabled=True, concurrency=-1,
+                                            xudpConcurrency=256, xudpProxyUDP443="reject")
+PY
+  echo 'PASS: unified update migrates saved Mux defaults and restores the original config on failure'
+fi

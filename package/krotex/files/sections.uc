@@ -59,6 +59,12 @@ function proxy_profile(input) {
 	return p;
 }
 
+function mux_defaults(flow) {
+	// Vision requires its own TCP connection. XUDP still uses a separate mux.
+	return { enabled: true, concurrency: flow == 'xtls-rprx-vision' ? -1 : 32,
+		xudpConcurrency: 256, xudpProxyUDP443: 'reject' };
+}
+
 function outbound(profile, tag) {
 	let user = { id: profile.id, encryption: 'none' };
 	if (profile.flow) user.flow = profile.flow;
@@ -75,7 +81,7 @@ function outbound(profile, tag) {
 		if (profile.alpn) settings.alpn = split(profile.alpn, ',');
 		stream.tlsSettings = settings;
 	}
-	return { tag, protocol: 'vless', settings: { vnext: [{ address: profile.address, port: profile.port, users: [user] }] }, streamSettings: stream };
+	return { tag, protocol: 'vless', settings: { vnext: [{ address: profile.address, port: profile.port, users: [user] }] }, streamSettings: stream, mux: mux_defaults(profile.flow) };
 }
 
 function device_macs(input) {
@@ -264,12 +270,22 @@ function compile(sections) {
 }
 
 try {
-	let config = json(readfile(ARGV[1]));
+	let source = readfile(ARGV[1]), config = json(source);
 	check(type(config) == 'object', 'Unable to read the Xray configuration.');
 	if (ARGV[0] == 'preview') {
 		delete config.krotex_sections;
 		delete config.krotex_link;
 		printf('%J\n', { config: ARGV[2] == '1' ? config : redact_config(config) });
+	}
+	else if (ARGV[0] == 'defaults') {
+		let changed = false;
+		for (let outbound in config.outbounds || [])
+			if (outbound.protocol == 'vless' && !outbound.mux) {
+				outbound.mux = mux_defaults(outbound.settings?.vnext?.[0]?.users?.[0]?.flow);
+				changed = true;
+			}
+		if (changed) printf('%J\n', config);
+		else print(source);
 	}
 	else if (ARGV[0] == 'read')
 		printf('%J\n', { sections: current_sections(config), legacy: config.krotex_sections == null });
