@@ -56,7 +56,7 @@ json_get_var() { running=1; }
 EOF
 cat > "$TEST_ROOT/usr/bin/xray" <<'EOF'
 #!/bin/sh
-if [ "$1" = version ]; then echo 'Xray 26.10.21 (package test)'; exit 0; fi
+if [ "$1" = version ]; then echo 'Xray 26.11.9 (package test)'; exit 0; fi
 test ! -f "$TEST_ROOT/invalid-config"
 EOF
 cat > "$TEST_ROOT/etc/init.d/rpcd" <<'EOF'
@@ -200,7 +200,7 @@ TEST_CORE_FILE="$WORK/core-archive"
 cat > "$TEST_CORE_FILE" <<'EOF'
 #!/bin/sh
 case "$1" in
-  version) echo 'Xray 26.10.21 (test)' ;;
+  version) echo 'Xray 26.11.9 (test)' ;;
   run) test ! -f "$TEST_ROOT/reject-private-core" ;;
   *) exit 1 ;;
 esac
@@ -258,11 +258,11 @@ rm "$TEST_ROOT/invalid-config"
 echo 'PASS: application updates validate with and retain the private core'
 
 # A single update upgrades the core, then leaves matching versions alone.
-sed 's/26.10.21/25.1.30/' "$TEST_ROOT/usr/libexec/krotex/xray" > "$WORK/old-core"
+sed 's/26.11.9/25.1.30/' "$TEST_ROOT/usr/libexec/krotex/xray" > "$WORK/old-core"
 cp "$WORK/old-core" "$TEST_ROOT/usr/libexec/krotex/xray"
 downloads_before="$(wc -l < "$TEST_ROOT/core-downloads")"
 sh "$WORK/bootstrap/update.sh" --ref v0.3.0 > "$WORK/unified.log" 2>&1 || { cat "$WORK/unified.log"; exit 1; }
-"$TEST_ROOT/usr/libexec/krotex/xray" version | grep -q '26.10.21'
+"$TEST_ROOT/usr/libexec/krotex/xray" version | grep -q '26.11.9'
 test "$(wc -l < "$TEST_ROOT/core-downloads")" -eq "$((downloads_before + 1))"
 test -f "$TEST_ROOT/running"
 cmp "$WORK/package-xray" "$TEST_ROOT/usr/bin/xray"

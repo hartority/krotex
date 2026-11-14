@@ -2,7 +2,7 @@
 set -e
 
 SYSROOT=
-VERSION=26.10.21
+VERSION=26.11.9
 CORE="$SYSROOT/usr/libexec/krotex/xray"
 INIT="$SYSROOT/etc/init.d/krotex"
 LOCK="$SYSROOT/var/lock/krotex-setup.lock"
