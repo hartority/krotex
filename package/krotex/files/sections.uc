@@ -59,12 +59,6 @@ function proxy_profile(input) {
 	return p;
 }
 
-function mux_defaults(flow) {
-	// Vision requires its own TCP connection. XUDP still uses a separate mux.
-	return { enabled: true, concurrency: flow == 'xtls-rprx-vision' ? -1 : 32,
-		xudpConcurrency: 256, xudpProxyUDP443: 'reject' };
-}
-
 function outbound(profile, tag) {
 	let user = { id: profile.id, encryption: 'none' };
 	if (profile.flow) user.flow = profile.flow;
@@ -81,7 +75,7 @@ function outbound(profile, tag) {
 		if (profile.alpn) settings.alpn = split(profile.alpn, ',');
 		stream.tlsSettings = settings;
 	}
-	return { tag, protocol: 'vless', settings: { vnext: [{ address: profile.address, port: profile.port, users: [user] }] }, streamSettings: stream, mux: mux_defaults(profile.flow) };
+	return { tag, protocol: 'vless', settings: { vnext: [{ address: profile.address, port: profile.port, users: [user] }] }, streamSettings: stream };
 }
 
 function device_macs(input) {
@@ -279,11 +273,16 @@ try {
 	}
 	else if (ARGV[0] == 'defaults') {
 		let changed = false;
-		for (let outbound in config.outbounds || [])
-			if (outbound.protocol == 'vless' && !outbound.mux) {
-				outbound.mux = mux_defaults(outbound.settings?.vnext?.[0]?.users?.[0]?.flow);
+		for (let outbound in config.outbounds || []) {
+			let mux = outbound.mux;
+			// Remove only the defaults introduced in Krotex 0.13.0.
+			if (outbound.protocol == 'vless' && type(mux) == 'object' && length(keys(mux)) == 4 &&
+				mux.enabled == true && (mux.concurrency == 32 || mux.concurrency == -1) &&
+				mux.xudpConcurrency == 256 && mux.xudpProxyUDP443 == 'reject') {
+				delete outbound.mux;
 				changed = true;
 			}
+		}
 		if (changed) printf('%J\n', config);
 		else print(source);
 	}

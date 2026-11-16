@@ -325,7 +325,7 @@ mv "$WORK/temporarily-hidden.init" "$TEST_ROOT/etc/init.d/krotex"
 echo 'PASS: preparation needs no installed init script and retains the parent update lock'
 
 if [ -n "${OPENWRT_TEST_ROOT:-}" ]; then
-  printf '%s\n' '{"custom":true,"outbounds":[{"protocol":"vless","settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}]}' > "$TEST_ROOT/etc/krotex/config.json"
+  printf '%s\n' '{"custom":true,"outbounds":[{"protocol":"vless","mux":{"enabled":true,"concurrency":-1,"xudpConcurrency":256,"xudpProxyUDP443":"reject"},"settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}]}' > "$TEST_ROOT/etc/krotex/config.json"
   cp "$TEST_ROOT/etc/krotex/config.json" "$WORK/pre-mux.json"
   touch "$TEST_ROOT/fail-rpcd"
   if sh "$WORK/source/update.sh" > "$WORK/mux-rollback.log" 2>&1; then
@@ -340,8 +340,7 @@ import sys
 with open(sys.argv[1]) as source:
     config = json.load(source)
 assert config["custom"] is True
-assert config["outbounds"][0]["mux"] == dict(enabled=True, concurrency=-1,
-                                            xudpConcurrency=256, xudpProxyUDP443="reject")
+assert "mux" not in config["outbounds"][0]
 PY
-  echo 'PASS: unified update migrates saved Mux defaults and restores the original config on failure'
+  echo 'PASS: unified update removes saved Mux defaults and restores the original config on failure'
 fi

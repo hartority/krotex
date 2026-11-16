@@ -63,24 +63,23 @@ test('section compiler: preserves legacy VLESS connection as the default section
   assert.equal(result.sections[0].profile.id,profile.id);
 });
 
-test('Mux defaults cover generated profiles and migrate saved configs without changing routes or custom Mux', {skip:!runtime}, () => {
-  const vpn = section('vpn','proxy',[],true);
-  const device = {...section('device','proxy'),mode:'proxy_devices',macs:['02:11:22:33:44:55']};
-  const config = run('compile',[vpn,device]);
-  const expected = {enabled:true,concurrency:32,xudpConcurrency:256,xudpProxyUDP443:'reject'};
-  for (const outbound of config.outbounds.filter(o=>o.protocol==='vless')) assert.deepEqual(outbound.mux,expected);
-  assert.ok(config.outbounds.filter(o=>o.protocol!=='vless').every(o=>!o.mux));
-  vpn.profile.flow='xtls-rprx-vision';
-  const vision=run('compile',[vpn]);
-  assert.equal(vision.outbounds.find(o=>o.protocol==='vless').mux.concurrency,-1);
-  for(const outbound of vision.outbounds) delete outbound.mux;
-  const migrated=run('defaults',[],vision);
-  assert.deepEqual(migrated.routing,vision.routing);
-  assert.deepEqual(migrated.krotex_sections,vision.krotex_sections);
-  assert.deepEqual(migrated.outbounds.find(o=>o.protocol==='vless').mux,{...expected,concurrency:-1});
+test('Mux rollback removes 0.13.0 defaults from saved VPNs and preserves custom settings', {skip:!runtime}, () => {
+  const config=run('compile',[section('vpn','proxy',[],true)]);
+  assert.ok(config.outbounds.every(outbound=>!outbound.mux));
+  for(const outbound of config.outbounds.filter(outbound=>outbound.protocol==='vless')) {
+    outbound.mux={enabled:true,concurrency:32,xudpConcurrency:256,xudpProxyUDP443:'reject'};
+  }
+  const vision=JSON.parse(JSON.stringify(config.outbounds.find(outbound=>outbound.protocol==='vless')));
+  vision.tag='vision';
+  vision.mux.concurrency=-1;
+  const custom={tag:'custom',protocol:'vless',mux:{enabled:true,concurrency:8,xudpConcurrency:16}};
+  config.outbounds.push(vision,custom);
+  const migrated=run('defaults',[],config);
+  assert.ok(migrated.outbounds.filter(outbound=>outbound.tag!=='custom').every(outbound=>!outbound.mux));
+  assert.deepEqual(migrated.outbounds.find(outbound=>outbound.tag==='custom'),custom);
+  assert.deepEqual(migrated.routing,config.routing);
+  assert.deepEqual(migrated.krotex_sections,config.krotex_sections);
   assert.deepEqual(run('defaults',[],migrated),migrated);
-  const custom={outbounds:[{protocol:'vless',mux:{enabled:false,concurrency:8}}]};
-  assert.deepEqual(run('defaults',[],custom),custom);
 });
 
 test('section compiler: rejects ambiguous defaults, injected rules, malformed domains and profiles', {skip:!runtime}, () => {
